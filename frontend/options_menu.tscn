@@ -2,9 +2,6 @@
 
 [ext_resource type="Script" uid="uid://bl8wgg60ombjh" path="res://options_menu.gd" id="1_options"]
 [ext_resource type="Texture2D" uid="uid://cfy8e87xc6p0b" path="res://assets/cog_icon.png" id="2_cog"]
-[ext_resource type="Texture2D" uid="uid://y1xbmusqsqd4" path="res://assets/icon_coffee.png" id="3_coffee"]
-[ext_resource type="Texture2D" uid="uid://ctbv6igcjngg4" path="res://assets/icon_floppy.png" id="4_floppy"]
-[ext_resource type="Texture2D" uid="uid://chyjiv8phiah7" path="res://assets/icon_link.png" id="5_link"]
 [ext_resource type="FontFile" uid="uid://5m1nwexhtvjo" path="res://assets/font/NotoColorEmoji-Regular.ttf" id="6_emoji"]
 
 [sub_resource type="FontVariation" id="FontVariation_default"]
@@ -162,6 +159,46 @@ text = "🌐 IMPORT FROM BBS"
 flat = true
 alignment = 0
 
+[node name="SupportRow" type="HBoxContainer" parent="SlidePanel/ScrollContainer/VBoxContainer/SectionTools/ContainerTools/ContentTools" unique_id=918273647]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ButtonSupport" type="Button" parent="SlidePanel/ScrollContainer/VBoxContainer/SectionTools/ContainerTools/ContentTools/SupportRow" unique_id=1749654714]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "If you like the app offer me a coffee. Thank you!"
+mouse_filter = 1
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+theme_override_colors/font_focus_color = Color(1, 1, 1, 1)
+theme_override_colors/font_pressed_color = Color(0.8, 0.8, 0.8, 1)
+theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
+theme_override_constants/h_separation = 4
+theme_override_fonts/font = SubResource("FontVariation_bqpnx")
+text = "☕ SUPPORT THE PROJECT"
+flat = true
+alignment = 0
+
+[node name="AppSettingsRow" type="HBoxContainer" parent="SlidePanel/ScrollContainer/VBoxContainer/SectionTools/ContainerTools/ContentTools" unique_id=918273648]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ButtonAppSettings" type="Button" parent="SlidePanel/ScrollContainer/VBoxContainer/SectionTools/ContainerTools/ContentTools/AppSettingsRow" unique_id=68917196]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Open android permission settings to add deeplink addresses. This will allow pico8 to launch when you click on a cart online."
+mouse_filter = 1
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+theme_override_colors/font_focus_color = Color(1, 1, 1, 1)
+theme_override_colors/font_pressed_color = Color(0.8, 0.8, 0.8, 1)
+theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
+theme_override_constants/h_separation = 4
+theme_override_fonts/font = SubResource("FontVariation_bqpnx")
+text = "🔗 DEEP LINKS SETTINGS"
+flat = true
+alignment = 0
+
 [node name="AdvancedFeaturesRow" type="HBoxContainer" parent="SlidePanel/ScrollContainer/VBoxContainer/SectionTools/ContainerTools/ContentTools" unique_id=-950410619]
 layout_mode = 2
 size_flags_horizontal = 3
@@ -188,6 +225,36 @@ size_flags_horizontal = 8
 size_flags_vertical = 4
 
 [node name="ToggleAdvancedFeatures" type="CheckButton" parent="SlidePanel/ScrollContainer/VBoxContainer/SectionTools/ContainerTools/ContentTools/AdvancedFeaturesRow/WrapperAdvancedFeatures" unique_id=-1912044692]
+unique_name_in_owner = true
+layout_mode = 0
+focus_mode = 0
+
+[node name="StartSploreRow" type="HBoxContainer" parent="SlidePanel/ScrollContainer/VBoxContainer/SectionTools/ContainerTools/ContentTools" unique_id=-950410620]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ButtonStartSploreLabel" type="Button" parent="SlidePanel/ScrollContainer/VBoxContainer/SectionTools/ContainerTools/ContentTools/StartSploreRow" unique_id=160700493]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "When enabled, PICO-8 launches into Splore (cart browser).
+When disabled, PICO-8 opens at the command prompt."
+mouse_filter = 1
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+theme_override_colors/font_focus_color = Color(1, 1, 1, 1)
+theme_override_colors/font_pressed_color = Color(0.8, 0.8, 0.8, 1)
+theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
+text = "🎯 START WITH SPLORE"
+flat = true
+alignment = 0
+
+[node name="WrapperStartSplore" type="Control" parent="SlidePanel/ScrollContainer/VBoxContainer/SectionTools/ContainerTools/ContentTools/StartSploreRow" unique_id=1271811604]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 8
+size_flags_vertical = 4
+
+[node name="ToggleStartSplore" type="CheckButton" parent="SlidePanel/ScrollContainer/VBoxContainer/SectionTools/ContainerTools/ContentTools/StartSploreRow/WrapperStartSplore" unique_id=-1912044693]
 unique_name_in_owner = true
 layout_mode = 0
 focus_mode = 0
@@ -1115,59 +1182,6 @@ autowrap_mode = 1
 [node name="Spacer" type="Control" parent="SlidePanel/ScrollContainer/VBoxContainer" unique_id=987985989]
 layout_mode = 2
 size_flags_vertical = 3
-
-[node name="ContainerButtons" type="MarginContainer" parent="SlidePanel/ScrollContainer/VBoxContainer" unique_id=944071361]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_constants/margin_left = 15
-theme_override_constants/margin_right = 5
-theme_override_constants/margin_bottom = 5
-
-[node name="ButtonsContainer" type="VBoxContainer" parent="SlidePanel/ScrollContainer/VBoxContainer/ContainerButtons" unique_id=1580658187]
-unique_name_in_owner = true
-layout_mode = 2
-
-[node name="ButtonSupport" type="Button" parent="SlidePanel/ScrollContainer/VBoxContainer/ContainerButtons/ButtonsContainer" unique_id=1749654714]
-unique_name_in_owner = true
-layout_mode = 2
-tooltip_text = "If you like the app offer me a coffee. Thank you!"
-theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
-theme_override_colors/font_focus_color = Color(1, 1, 1, 1)
-theme_override_colors/font_pressed_color = Color(0.8, 0.8, 0.8, 1)
-theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
-text = "   Support the Project"
-icon = ExtResource("3_coffee")
-flat = true
-alignment = 0
-expand_icon = true
-
-[node name="ButtonAppSettings" type="Button" parent="SlidePanel/ScrollContainer/VBoxContainer/ContainerButtons/ButtonsContainer" unique_id=68917196]
-unique_name_in_owner = true
-layout_mode = 2
-tooltip_text = "Open android permission settings to add deeplink addresses. This will allow pico8 to launch when you click on a cart online."
-theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
-theme_override_colors/font_focus_color = Color(1, 1, 1, 1)
-theme_override_colors/font_pressed_color = Color(0.8, 0.8, 0.8, 1)
-theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
-text = "   Deep Links Settings"
-icon = ExtResource("5_link")
-flat = true
-alignment = 0
-expand_icon = true
-
-[node name="ButtonSave" type="Button" parent="SlidePanel/ScrollContainer/VBoxContainer/ContainerButtons/ButtonsContainer" unique_id=862331075]
-unique_name_in_owner = true
-layout_mode = 2
-tooltip_text = "Save your configuration"
-theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
-theme_override_colors/font_focus_color = Color(1, 1, 1, 1)
-theme_override_colors/font_pressed_color = Color(0.8, 0.8, 0.8, 1)
-theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
-text = "   Save Settings"
-icon = ExtResource("4_floppy")
-flat = true
-alignment = 0
-expand_icon = true
 
 [node name="EdgeHandler" type="Control" parent="." unique_id=1673758275]
 layout_mode = 3

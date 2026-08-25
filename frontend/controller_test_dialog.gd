@@ -7,6 +7,10 @@ extends PanelContainer
 
 var test_device_id: int = -1
 var last_event_time: int = 0
+# Rolling history of recent joypad button events so we can see duplicates
+# fired by the same physical press (multiple bN lines within a few ms).
+var _btn_history: Array[String] = []
+const BTN_HISTORY_MAX: int = 5
 
 func _ready() -> void:
 	close_test_btn.pressed.connect(queue_free)
@@ -20,6 +24,7 @@ func setup(device_id: int) -> void:
 	axis_test_label.text = ""
 	key_test_label.text = ""
 	last_event_time = 0
+	_btn_history.clear()
 
 	var screen_size = get_viewport().get_visible_rect().size
 	var font_size = clamp(int(min(screen_size.x, screen_size.y) * 0.05), 12, 24)
@@ -69,9 +74,17 @@ func _input(event: InputEvent) -> void:
 			return n.left(15) + ".." if n.length() > 15 else n
 		return "Non-Joypad"
 
-	if event is InputEventJoypadButton and event.pressed:
+	if event is InputEventJoypadButton:
 		last_event_time = now
-		button_test_label.text = "JoyBtn %d->b%d [ID: %d - %s]" % [event.button_index, event.button_index, event.device, _get_dev_name.call(event.device)]
+		# Compact one-line entry per event so back-to-back duplicates from a
+		# single physical press are both visible. Includes a relative delta so
+		# you can tell if two entries fired in the same ms.
+		var dir = "↓" if event.pressed else "↑"
+		var entry = "b%d %s dev:%d (+%dms)" % [event.button_index, dir, event.device, delta]
+		_btn_history.append(entry)
+		while _btn_history.size() > BTN_HISTORY_MAX:
+			_btn_history.pop_front()
+		button_test_label.text = "\n".join(_btn_history)
 		if delta > 100:
 			axis_test_label.text = ""
 			key_test_label.text = ""

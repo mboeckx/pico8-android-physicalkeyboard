@@ -11,6 +11,7 @@ var panel_width = 250.0
 var is_open: bool = false
 var audio_backend: String = "sles" # Default to sles
 var custom_root_path: String = ""
+var start_with_splore: bool = true
 var touch_start_x = 0.0
 var is_dragging = false
 var connected_controllers_dialog_scene = preload("res://connected_controllers_dialog.tscn")
@@ -147,7 +148,6 @@ func _ready() -> void:
 	%ButtonAppSettings.pressed.connect(_on_app_settings_pressed)
 	if %ButtonSupport:
 		%ButtonSupport.pressed.connect(_on_support_pressed)
-	%ButtonSave.pressed.connect(save_config)
 	
 	%BtnDisplayToggle.pressed.connect(_on_section_toggled.bind(%BtnDisplayToggle, %ContainerDisplay))
 	%BtnControlsToggle.pressed.connect(_on_section_toggled.bind(%BtnControlsToggle, %ContainerControls))
@@ -170,6 +170,13 @@ func _ready() -> void:
 			%ToggleAdvancedFeatures.toggled.connect(_on_advanced_features_toggled)
 	if %ButtonAdvancedFeaturesLabel:
 		%ButtonAdvancedFeaturesLabel.pressed.connect(_on_label_pressed.bind(%ToggleAdvancedFeatures))
+
+	# Start with Splore
+	if %ToggleStartSplore:
+		if not %ToggleStartSplore.toggled.is_connected(_on_start_with_splore_toggled):
+			%ToggleStartSplore.toggled.connect(_on_start_with_splore_toggled)
+	if %ButtonStartSploreLabel:
+		%ButtonStartSploreLabel.pressed.connect(_on_label_pressed.bind(%ToggleStartSplore))
 	
 	# 1. Shader Strength Row
 	if not %SliderShaderOpacity.value_changed.is_connected(_on_shader_opacity_changed):
@@ -379,7 +386,6 @@ func _update_layout():
 	# Apply Scaling to Container Margins (Dynamically based on Tscn values)
 	_apply_scaled_margins(%ContainerDisplay, scale_factor)
 	_apply_scaled_margins(%ContainerControls, scale_factor)
-	_apply_scaled_margins(%ContainerButtons, scale_factor)
 	_apply_scaled_margins(%SaturationMargins, scale_factor)
 	_apply_scaled_margins(%ShaderOpacityMargins, scale_factor)
 
@@ -541,12 +547,11 @@ func _update_layout():
 	%BtnToolsToggle.add_theme_font_size_override("font_size", int(dynamic_font_size * 1.1))
 	_apply_scaled_margins(%ContainerTools, scale_factor)
 	_style_option_row(%ButtonAdvancedFeaturesLabel, %ToggleAdvancedFeatures, %WrapperAdvancedFeatures, dynamic_font_size, scale_factor)
+	_style_option_row(%ButtonStartSploreLabel, %ToggleStartSplore, %WrapperStartSplore, dynamic_font_size, scale_factor)
 
-	# 4. Save Buttons
-	%ButtonsContainer.add_theme_constant_override("separation", 4 * scale_factor)
+	# 4. Support / App Settings buttons (now inside the Tools section)
 	%ButtonAppSettings.add_theme_font_size_override("font_size", dynamic_font_size)
 	%ButtonSupport.add_theme_font_size_override("font_size", dynamic_font_size)
-	%ButtonSave.add_theme_font_size_override("font_size", dynamic_font_size)
 	
 	# 5. Version Label (slightly smaller)
 	%VersionLabel.add_theme_font_size_override("font_size", max(10, int(dynamic_font_size * 0.8)))
@@ -777,6 +782,9 @@ func open_menu():
 
 func close_menu():
 	is_open = false
+	# Catch any state changed outside the per-handler persist paths
+	# (drag offsets, control layouts, controller assignments, etc.).
+	_persist_all()
 	var tween = create_tween()
 	tween.tween_property(panel, "position:x", -panel.size.x, ANIM_DURATION).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
 	
@@ -791,6 +799,12 @@ func close_menu():
 	if PicoVideoStreamer.instance:
 		PicoVideoStreamer.instance.set_process_unhandled_input(true)
 		PicoVideoStreamer.instance.set_process_input(true)
+
+func _notification(what: int) -> void:
+	# App going to background — flush any pending state (drag offsets, layouts,
+	# controller assignments) even if the panel is still open.
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and is_open:
+		_persist_all()
 
 func _input(event: InputEvent) -> void:
 	# if event is InputEventKey and event.pressed and event.keycode == KEY_U:
@@ -920,12 +934,12 @@ func _on_root_dir_selected(status: bool, selected_paths: PackedStringArray, _fil
 			custom_root_path = custom_root_path.replace("file://", "")
 			
 		_update_root_path_label()
-		save_config() # Auto-save
+		PicoBootManager.set_setting("settings", "custom_root_path", custom_root_path)
 
 func _on_clear_root_pressed():
 	custom_root_path = ""
 	_update_root_path_label()
-	save_config()
+	PicoBootManager.set_setting("settings", "custom_root_path", custom_root_path)
 
 func _update_root_path_label():
 	if %LabelRootPath:
@@ -961,7 +975,6 @@ func _on_audio_backend_toggled(toggled_on: bool):
 
 func _save_audio_setting_only():
 	PicoBootManager.set_setting("settings", "audio_backend", audio_backend)
-	PicoBootManager.save_config()
 
 func _navigate_focus(side: Side):
 	var current_focus = get_viewport().gui_get_focus_owner()
@@ -990,9 +1003,11 @@ func _navigate_focus(side: Side):
 
 func _on_haptic_toggled(toggled_on: bool):
 	PicoVideoStreamer.set_haptic_enabled(toggled_on)
+	PicoBootManager.set_setting("settings", "haptic_enabled", toggled_on)
 
 func _on_swap_zx_toggled(toggled_on: bool):
 	PicoVideoStreamer.set_swap_zx_enabled(toggled_on)
+	PicoBootManager.set_setting("settings", "swap_zx_enabled", toggled_on)
 
 func _on_keyboard_toggled(toggled_on: bool):
 	# Toggle between Full and Gaming keyboard logic
@@ -1037,10 +1052,12 @@ func _update_input_mode_label(is_trackpad: bool):
 func _on_sensitivity_changed(val: float):
 	PicoVideoStreamer.set_trackpad_sensitivity(val * 0.5)
 	%LabelSensitivityValue.text = str(val)
+	PicoBootManager.set_setting("settings", "trackpad_sensitivity", val * 0.5)
 
 func _on_saturation_changed(val: float):
 	PicoVideoStreamer.set_saturation(val)
 	%LabelSaturationValue.text = "%.2f" % val
+	PicoBootManager.set_setting("settings", "saturation", val)
 
 func _on_saturation_minus():
 	var new_val = %SliderSaturation.value - %SliderSaturation.step
@@ -1056,6 +1073,7 @@ func _on_button_hue_changed(val: float):
 	var degrees = (val - 1.0) * 180.0
 	PicoVideoStreamer.set_button_hue(degrees)
 	%LabelButtonHueValue.text = "%.2f" % val
+	PicoBootManager.set_setting("settings", "button_hue", degrees)
 
 func _on_button_hue_minus():
 	var new_val = %SliderButtonHue.value - %SliderButtonHue.step
@@ -1068,6 +1086,7 @@ func _on_button_hue_plus():
 func _on_button_sat_changed(val: float):
 	PicoVideoStreamer.set_button_saturation(val)
 	%LabelButtonSatValue.text = "%.2f" % val
+	PicoBootManager.set_setting("settings", "button_saturation", val)
 
 func _on_button_sat_minus():
 	var new_val = %SliderButtonSat.value - %SliderButtonSat.step
@@ -1080,6 +1099,7 @@ func _on_button_sat_plus():
 func _on_button_light_changed(val: float):
 	PicoVideoStreamer.set_button_lightness(val)
 	%LabelButtonLightValue.text = "%.2f" % val
+	PicoBootManager.set_setting("settings", "button_lightness", val)
 
 func _on_button_light_minus():
 	var new_val = %SliderButtonLight.value - %SliderButtonLight.step
@@ -1095,6 +1115,7 @@ func _on_integer_scaling_toggled(toggled_on: bool):
 	var arranger = get_tree().root.get_node_or_null("Main/Arranger")
 	if arranger:
 		arranger.dirty = true
+	PicoBootManager.set_setting("settings", "integer_scaling_enabled", toggled_on)
 
 func _on_show_controls_selected(index: int):
 	PicoVideoStreamer.set_controls_mode(index)
@@ -1102,6 +1123,7 @@ func _on_show_controls_selected(index: int):
 	var arranger = get_tree().root.get_node_or_null("Main/Arranger")
 	if arranger:
 		arranger.dirty = true
+	PicoBootManager.set_setting("settings", "controls_mode", index)
 
 func _on_show_controls_button_pressed():
 	# Cycle through options
@@ -1111,6 +1133,7 @@ func _on_show_controls_button_pressed():
 
 func _on_bezel_toggled(toggled_on: bool):
 	PicoVideoStreamer.set_bezel_enabled(toggled_on)
+	PicoBootManager.set_setting("settings", "bezel_enabled", toggled_on)
 
 func _on_reposition_toggled(toggled_on: bool):
 	PicoVideoStreamer.set_display_drag_enabled(toggled_on)
@@ -1171,6 +1194,7 @@ func _on_shader_button_pressed():
 
 func _on_shader_selected(index: int):
 	PicoVideoStreamer.set_shader_type(index as PicoVideoStreamer.ShaderType)
+	PicoBootManager.set_setting("settings", "shader_type", index)
 
 func _on_orientation_button_pressed():
 	# Cycle through orientation options
@@ -1180,6 +1204,7 @@ func _on_orientation_button_pressed():
 
 func _on_orientation_selected(index: int):
 	PicoVideoStreamer.set_orientation_mode(index)
+	PicoBootManager.set_setting("settings", "orientation_mode", index)
 
 func _on_theme_button_pressed():
 	var theme_option_button = %ThemeSelect
@@ -1266,54 +1291,48 @@ func _on_connected_controllers_pressed():
 
 func _on_bg_color_picked(color: Color):
 	RenderingServer.set_default_clear_color(color)
+	PicoBootManager.set_setting("settings", "bg_color", color)
 
-func save_config() -> void:
+# Safety-net bulk save. Individual toggle/slider handlers persist their own
+# value on change, so this only exists to catch state changed OUTSIDE menu
+# handlers — drag offsets, control layouts, controller assignments — when the
+# panel closes or the app backgrounds. PicoBootManager.set_setting writes to
+# disk on every call, so this doesn't need an explicit save_config() at the end.
+func _persist_all() -> void:
 	PicoBootManager.set_setting("settings", "haptic_enabled", PicoVideoStreamer.get_haptic_enabled())
 	PicoBootManager.set_setting("settings", "swap_zx_enabled", PicoVideoStreamer.get_swap_zx_enabled())
 	PicoBootManager.set_setting("settings", "trackpad_sensitivity", PicoVideoStreamer.get_trackpad_sensitivity())
 	PicoBootManager.set_setting("settings", "integer_scaling_enabled", PicoVideoStreamer.get_integer_scaling_enabled())
 	PicoBootManager.set_setting("settings", "bezel_enabled", PicoVideoStreamer.get_bezel_enabled())
-	
-	# Save Controls Mode (Integer)
+
 	PicoBootManager.set_setting("settings", "controls_mode", PicoVideoStreamer.get_controls_mode())
-	
+
 	PicoBootManager.set_setting("settings", "ignored_devices_by_user", ControllerUtils.ignored_devices_by_user)
 	PicoBootManager.set_setting("settings", "controller_assignments", ControllerUtils.controller_assignments)
-	
+
 	PicoBootManager.set_setting("settings", "shader_type", PicoVideoStreamer.get_shader_type())
 	PicoBootManager.set_setting("settings", "orientation_mode", PicoVideoStreamer.get_orientation_mode())
 	PicoBootManager.set_setting("settings", "shader_opacity", PicoVideoStreamer.get_shader_opacity())
 	PicoBootManager.set_setting("settings", "saturation", PicoVideoStreamer.get_saturation())
 	PicoBootManager.set_setting("settings", "button_hue", PicoVideoStreamer.get_button_hue())
 	PicoBootManager.set_setting("settings", "button_saturation", PicoVideoStreamer.get_button_saturation())
-	PicoBootManager.set_setting("settings", "button_saturation", PicoVideoStreamer.get_button_saturation())
 	PicoBootManager.set_setting("settings", "button_lightness", PicoVideoStreamer.get_button_lightness())
-	
+
 	PicoBootManager.set_setting("settings", "advanced_features_enabled", PicoVideoStreamer.get_advanced_features_enabled())
-	
+	PicoBootManager.set_setting("settings", "start_with_splore", start_with_splore)
+
 	PicoBootManager.set_setting("settings", "bg_color", %ColorPickerBG.color)
-	
+
 	PicoBootManager.set_setting("settings", "display_drag_offset_portrait", PicoVideoStreamer.display_drag_offset_portrait)
 	PicoBootManager.set_setting("settings", "display_drag_offset_landscape", PicoVideoStreamer.display_drag_offset_landscape)
 	PicoBootManager.set_setting("settings", "display_scale_portrait", PicoVideoStreamer.display_scale_portrait)
 	PicoBootManager.set_setting("settings", "display_scale_landscape", PicoVideoStreamer.display_scale_landscape)
-	
+
 	PicoBootManager.set_setting("settings", "audio_backend", audio_backend)
 	PicoBootManager.set_setting("settings", "custom_root_path", custom_root_path)
-	
+
 	PicoBootManager.set_setting("settings", "control_layout_portrait", PicoVideoStreamer.control_layout_portrait)
 	PicoBootManager.set_setting("settings", "control_layout_landscape", PicoVideoStreamer.control_layout_landscape)
-	
-	PicoBootManager.save_config()
-	
-	# Visual Feedback
-	var orig_text = %ButtonSave.text
-	%ButtonSave.text = "   Saved!"
-	%ButtonSave.release_focus()
-	%ButtonSave.grab_focus()
-	
-	await get_tree().create_timer(1.0).timeout
-	%ButtonSave.text = orig_text
 
 func load_config():
 	PicoBootManager.load_config()
@@ -1365,8 +1384,13 @@ func load_config():
 	
 	if %ToggleAdvancedFeatures:
 		%ToggleAdvancedFeatures.set_pressed_no_signal(advanced_enabled)
-	
+
 	PicoVideoStreamer.set_advanced_features_enabled(advanced_enabled)
+
+	# Start with Splore
+	start_with_splore = PicoBootManager.get_setting("settings", "start_with_splore", true)
+	if %ToggleStartSplore:
+		%ToggleStartSplore.set_pressed_no_signal(start_with_splore)
 	
 	# Load Theme
 	var current_theme = ThemeManager.get_current_theme()
@@ -1586,6 +1610,7 @@ func _on_import_bbs_pressed():
 func _on_shader_opacity_changed(val: float):
 	PicoVideoStreamer.set_shader_opacity(val)
 	%LabelShaderOpacityValue.text = "%.2f" % val
+	PicoBootManager.set_setting("settings", "shader_opacity", val)
 
 func _on_shader_opacity_minus():
 	var s = %SliderShaderOpacity
@@ -1597,6 +1622,11 @@ func _on_shader_opacity_plus():
 
 func _on_advanced_features_toggled(toggled_on: bool):
 	PicoVideoStreamer.set_advanced_features_enabled(toggled_on)
+	PicoBootManager.set_setting("settings", "advanced_features_enabled", toggled_on)
+
+func _on_start_with_splore_toggled(toggled_on: bool):
+	start_with_splore = toggled_on
+	PicoBootManager.set_setting("settings", "start_with_splore", toggled_on)
 	
 func _check_pico8_version() -> bool:
 	var path = "user://package/rootfs/home/pico/pico-8/pico8_64"

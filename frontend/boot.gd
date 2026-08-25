@@ -162,7 +162,7 @@ func _ready() -> void:
 	else:
 		request_storage_permission()
 
-const BOOTSTRAP_PACKAGE_VERSION = "21"
+const BOOTSTRAP_PACKAGE_VERSION = "26"
 
 func setup():
 	set_ui_state(false, false, true) # permission_ui=false, select_zip_ui=false, progress_ui=true
@@ -179,8 +179,7 @@ func setup():
 	DirAccess.make_dir_recursive_absolute(PUBLIC_FOLDER + "/data/carts/.placeholder")
 	var public_folder = DirAccess.open(PUBLIC_FOLDER)
 	
-	#var DEBUG = OS.is_debug_build()
-	var DEBUG = false
+	var DEBUG = OS.is_debug_build()
 	
 	#step 1: untar package
 	var need_to_untar = DEBUG

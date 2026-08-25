@@ -3,19 +3,10 @@ ROOTFS_LOCATION=$(pwd)/rootfs
 
 echo "Host script started at $(date)"
 
-# Ensure tmp directory exists
-LD_LIBRARY_PATH=. ./busybox mkdir -p tmp
-
-# Create PICO-8 pipes on HOST filesystem (bound to /tmp in proot) if they don't exist
-[ -p tmp/pico8.vid ] || LD_LIBRARY_PATH=. ./busybox mkfifo tmp/pico8.vid
-[ -p tmp/pico8.in ] || LD_LIBRARY_PATH=. ./busybox mkfifo tmp/pico8.in
-chmod 666 tmp/pico8.vid tmp/pico8.in
-
-
 # Running pulsar.sh in background, logging to PUBLIC log directory
 LOG_DIR="/sdcard/Documents/pico8/logs"
 mkdir -p "$LOG_DIR"
-LD_LIBRARY_PATH=. ./busybox ash pulsar.sh > "$LOG_DIR/pulse.log" 2>&1 &
+LD_LIBRARY_PATH=. ./busybox ash ./pulsar.sh > "$LOG_DIR/pulse.log" 2>&1 &
 
 
 while [ ! -d tmp/pulse ]; do
@@ -38,6 +29,14 @@ exec 7< tmp/pulse
 # 3. Use /proc/self/fd/8 as the path (short & absolute)
 mkdir -p ptmp
 exec 8< ./ptmp
+
+# to open links from PICO-8 (Preserve if exists to not break Godot handle)
+mkdir -p tmp
+if [ ! -p tmp/xdgopen ]; then
+    LD_LIBRARY_PATH=. ./busybox rm -f tmp/xdgopen
+    LD_LIBRARY_PATH=. ./busybox mkfifo tmp/xdgopen
+    chmod 666 tmp/xdgopen
+fi
 
 PROOT_TMP_DIR="/proc/self/fd/8"
 # Patch proot binary to use FD path for loader (23 chars target + 22 slashes padding = 45 chars total)
@@ -68,5 +67,3 @@ LD_LIBRARY_PATH=. PROOT_TMP_DIR=$PROOT_TMP_DIR ./proot \
     ${PROOT_BBS_BIND:+"$PROOT_BBS_BIND"} \
     --rootfs=$ROOTFS_LOCATION \
     /usr/bin/busybox env PATH=/usr/bin /usr/bin/busybox ash /home/pico/start_pico.sh "$@"
-
-#echo "quit-daemon" > tmp/xdgopen

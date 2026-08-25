@@ -29,6 +29,9 @@ var _input_queue: Array = []
 var _main_thread_input_buffer: Array = []
 var _pipe_reset_complete: bool = true
 var _connection_allowed: bool = false
+# Non-mouse packets that have been written to the FIFO but not yet acked by the
+# shim. Stored under _mutex. On reset, prepended back to _input_queue for replay.
+var _pending_acks: Array = []
 
 const PIDOT_EVENT_MOUSEEV = 1;
 const PIDOT_EVENT_KEYEV = 2;
@@ -288,14 +291,14 @@ func _thread_function():
 		if do_reset:
 			synched = false
 			buffer.clear()
-			
+
 			# Force clean reconnection of pipes (fixes Restart with FIFO)
 			if _applinks_plugin:
 				if vid_pipe_id != -1:
 					print("Pipe Thread: Reset - Closing Video Pipe ", vid_pipe_id)
 					_applinks_plugin.pipe_close(vid_pipe_id)
 					vid_pipe_id = -1
-				
+
 				if in_pipe_id != -1:
 					print("Pipe Thread: Reset - Closing Input Pipe ", in_pipe_id)
 					_applinks_plugin.pipe_close(in_pipe_id)
@@ -379,11 +382,40 @@ func _thread_function():
 		_mutex.unlock()
 		
 		if inputs.size() > 0:
-			for packet in inputs:
-				var pba = PackedByteArray(packet)
+			var failed_index = -1
+			var key_written = 0
+			var newly_pending: Array = []
+			for i in range(inputs.size()):
+				var pba = PackedByteArray(inputs[i])
 				if _applinks_plugin:
-					_applinks_plugin.pipe_write(in_pipe_id, pba)
-			
+					var ok = _applinks_plugin.pipe_write(in_pipe_id, pba)
+					if not ok:
+						failed_index = i
+						break
+					if inputs[i][0] != PIDOT_EVENT_MOUSEEV:
+						key_written += 1
+						newly_pending.append(inputs[i])
+			# Track non-mouse packets awaiting ack so the watchdog can replay them on reset.
+			if newly_pending.size() > 0 and _mutex:
+				_mutex.lock()
+				_pending_acks.append_array(newly_pending)
+				_mutex.unlock()
+
+			if failed_index != -1:
+				# Writer is dead (Android 10 invalidated the fd across pause/resume).
+				# Requeue the failed packet + any unsent ones at the FRONT of the input
+				# queue so they replay in order once the pipe is reopened.
+				var unsent = inputs.slice(failed_index)
+				if _mutex:
+					_mutex.lock()
+					var combined = unsent.duplicate()
+					combined.append_array(_input_queue)
+					_input_queue = combined
+					_reset_requested = true
+					_pipe_reset_complete = false
+					_mutex.unlock()
+				print("Pipe Thread: Input write failed — requeued ", unsent.size(), " packet(s), requesting reset")
+
 		# 2. Read Video
 		var chunk: PackedByteArray
 		if _applinks_plugin:
@@ -503,8 +535,7 @@ func release_input_locks():
 const SYNC_SEQ = [80, 73, 67, 79, 56, 83, 89, 78, 67, 95, 95] # "PICO8SYNC__"
 #const SYNC_SEQ = [80, 73, 67, 79, 56, 83, 89] # "PICO8SY"
 var SYNC_SEQ_PBA: PackedByteArray
-const CUSTOM_BYTE_COUNT = 3
-#const CUSTOM_BYTE_COUNT = 5 # State(1) + Input(1) + Cart(1) + Editor(1) + NavState(1)
+const CUSTOM_BYTE_COUNT = 5 # NavState(1) + MasterState(1) + Volume(1) + LastEchoSeq(2)
 var current_custom_data := range(CUSTOM_BYTE_COUNT)
 const DISPLAY_BYTES = 128 * 128 * 4 # 64KB RGBA8888
 const TOTAL_PACKET_SIZE = len(SYNC_SEQ) + CUSTOM_BYTE_COUNT + DISPLAY_BYTES
@@ -790,17 +821,68 @@ var raw_cart_loaded: int = 0
 var raw_master_state: int = 0
 var raw_volume: int = 256
 
+# Heartbeat ack state — see _ack_watchdog_check() for the watchdog logic.
+var _shim_last_echo_seq: int = 0           # Last seq the shim has reported receiving
+var _frames_since_ack_advance: int = 0     # Video frames since _shim_last_echo_seq changed
+const ACK_PENDING_THRESHOLD: int = 3       # Reset if pending packets exceed this...
+const ACK_STAGNATION_FRAMES: int = 10      # ...for this many video frames with no ack advance
+
+# Called from the video thread on each parsed frame. Drops acked packets from
+# _pending_acks; if the queue keeps growing while the shim's echo is stuck,
+# the pipe is silently dropping writes — reset and replay.
+func _ack_watchdog_check(echoed_seq: int) -> void:
+	if not _mutex:
+		return
+	_mutex.lock()
+	var advanced := echoed_seq != _shim_last_echo_seq
+	if advanced:
+		_shim_last_echo_seq = echoed_seq
+		_frames_since_ack_advance = 0
+		# Drop any pending packets whose seq is now <= echoed_seq.
+		# Seqs wrap at 0xFFFF — use a window-based comparison to handle wrap.
+		while _pending_acks.size() > 0:
+			var pkt: Array = _pending_acks[0]
+			var pkt_seq: int = pkt[6] | (pkt[7] << 8)
+			# Treat the seq space as a 16-bit circle: "<= echoed" if the forward
+			# distance from pkt_seq to echoed_seq is in [0, 32768).
+			var diff := (echoed_seq - pkt_seq) & 0xFFFF
+			if diff < 0x8000:
+				_pending_acks.pop_front()
+			else:
+				break
+	else:
+		_frames_since_ack_advance += 1
+
+	var pending_size := _pending_acks.size()
+	var should_reset := pending_size > ACK_PENDING_THRESHOLD and _frames_since_ack_advance >= ACK_STAGNATION_FRAMES
+	if should_reset:
+		print("Pipe Watchdog: input ack stalled (pending=", pending_size,
+			" stagnant_frames=", _frames_since_ack_advance,
+			" echoed_seq=", echoed_seq, ") — resetting pipe and replaying")
+		# Prepend pending packets to _input_queue so the writer thread re-sends them.
+		var replay := _pending_acks.duplicate()
+		_pending_acks.clear()
+		replay.append_array(_input_queue)
+		_input_queue = replay
+		_reset_requested = true
+		_pipe_reset_complete = false
+		_frames_since_ack_advance = 0
+	_mutex.unlock()
+
 func _process_packet_thread(data: PackedByteArray):
-	# Data Structure for debug:
-	# 0-10: "PICO8SYNC__" (11 bytes)
-	# 11: NavState (Classic Flags)
-	# 12: MasterState (Editor View / Run State)
-	# 13: Volume (0-144, multiplied by 2 for real value)
-	# 14+: Video Data (8192 bytes)
-	if data.size() >= 14:
+	# Data Structure:
+	# 0-10:  "PICO8SYNC__" (11 bytes)
+	# 11:    NavState (Classic Flags)
+	# 12:    MasterState (Editor View / Run State)
+	# 13:    Volume (0-144, multiplied by 2 for real value)
+	# 14-15: LastEchoSeq (uint16 LE) — shim's mirror of the last seq it received
+	# 16+:   Video Data (8192 bytes)
+	if data.size() >= 16:
 		current_navstate = data[11]
 		raw_master_state = data[12]
 		raw_volume = data[13] * 2
+		var echoed: int = data[14] | (data[15] << 8)
+		_ack_watchdog_check(echoed)
 
 	# Image starts after SYNC + CUSTOM
 	var im_start = len(SYNC_SEQ) + CUSTOM_BYTE_COUNT
@@ -929,19 +1011,32 @@ func toggle_metrics():
 const SDL_KEYMAP: Dictionary = preload("res://sdl_keymap.json").data
 
 func send_key(id: int, down: bool, repeat: bool, mod: int):
+	var seq := _next_seq()
 	# Add to local buffer (Batching)
 	_main_thread_input_buffer.append([
 		PIDOT_EVENT_KEYEV,
 		id, int(down), int(repeat),
-		mod & 0xff, (mod >> 8) & 0xff, 0, 0
+		mod & 0xff, (mod >> 8) & 0xff,
+		seq & 0xff, (seq >> 8) & 0xff
 	])
-			
+
 func send_input(char: int):
+	var seq := _next_seq()
 	# Add to local buffer (Batching)
 	_main_thread_input_buffer.append([
 		PIDOT_EVENT_CHAREV, char,
-		0, 0, 0, 0, 0, 0
+		0, 0, 0, 0,
+		seq & 0xff, (seq >> 8) & 0xff
 	])
+
+# Heartbeat seq for non-mouse packets. Wraps at 0xFFFF; we skip 0 since the shim
+# treats seq=0 as "no echo" (mouse events use that).
+var _next_seq_counter: int = 0
+func _next_seq() -> int:
+	_next_seq_counter = (_next_seq_counter + 1) & 0xFFFF
+	if _next_seq_counter == 0:
+		_next_seq_counter = 1
+	return _next_seq_counter
 
 func _on_audio_btn_pressed():
 	var SDL_SCANCODE_LCTRL = 224

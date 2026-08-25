@@ -66,14 +66,19 @@ static bool is_version_0_2_7 = false;
 #define PIDOT_EVENT_KEYEV 2
 #define PIDOT_EVENT_CHAREV 3
 
-#define IN_PACKET_SIZE 8 // Event(1) + X(2) + Y(2) + Mask(1) + Pad(2)
+#define IN_PACKET_SIZE 8 // Event(1) + scancode(1) + down(1) + repeat(1) + mod_lo(1) + mod_hi(1) + seq_lo(1) + seq_hi(1)
 static uint8_t in_packet[IN_PACKET_SIZE];
 #define FB_WIDTH 128
 #define FB_HEIGHT 128
 #define PIXEL_SIZE (FB_WIDTH * FB_HEIGHT * 4)
 #define HEADER_SIZE 11 // "PICO8SYNC__"
-#define META_SIZE 3 // NavState + MasterState + Volume
-#define PACKET_SIZE (HEADER_SIZE + META_SIZE + PIXEL_SIZE) 
+#define META_SIZE 5 // NavState + MasterState + Volume + LastEchoSeq(2 bytes LE)
+#define PACKET_SIZE (HEADER_SIZE + META_SIZE + PIXEL_SIZE)
+
+// Last non-mouse input packet seq received from Godot, echoed back in video meta
+// so Godot can detect lost writes (e.g. when Android invalidates its writer fd
+// silently across a recents-list resume).
+static uint16_t last_echo_seq = 0;
 
 #define FIFO_NAME_VID "/tmp/pico8.vid" 
 
@@ -172,6 +177,15 @@ static bool pico_poll_event() {
 
     ssize_t n = read(in_fd, in_packet, IN_PACKET_SIZE);
     if (n == IN_PACKET_SIZE) {
+        // Heartbeat ack: non-mouse packets carry a seq number in bytes 6-7.
+        // We mirror the last seen seq back to Godot via the video meta header so
+        // it can detect silently-dropped writes and trigger a pipe reset+replay.
+        if (in_packet[0] != PIDOT_EVENT_MOUSEEV) {
+            uint16_t seq = (uint16_t)in_packet[6] | ((uint16_t)in_packet[7] << 8);
+            if (seq != 0) {
+                last_echo_seq = seq;
+            }
+        }
         return true;
     } else if (n < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -186,6 +200,9 @@ static bool pico_poll_event() {
         close(in_fd);
         in_fd = -1;
     }
+    // Note: a partial read (1..7 bytes) would silently consume them. Since FIFO writes
+    // under PIPE_BUF (4096) are atomic on Linux, this shouldn't happen for our 8-byte
+    // packets — but if it ever does, future reads would desync. Left unhandled for now.
     return false;
 }
 
@@ -354,6 +371,9 @@ void pico_send_vid_data() {
         packet_buffer[HEADER_SIZE] = navstate;
         packet_buffer[HEADER_SIZE + 1] = master_state;
         packet_buffer[HEADER_SIZE + 2] = raw_volume;
+        // Heartbeat ack: echo the last received non-mouse seq back to Godot.
+        packet_buffer[HEADER_SIZE + 3] = (uint8_t)(last_echo_seq & 0xFF);
+        packet_buffer[HEADER_SIZE + 4] = (uint8_t)((last_echo_seq >> 8) & 0xFF);
         // We reuse the last 4 bytes of the magic string "PICO8SYNC__"
         // New Format: "PICO8SY" (7 bytes) + NaVSate(1) + MasterState(1) + Volume(1)
         //memcpy(packet_buffer, "PICO8SY", 7);
@@ -468,11 +488,25 @@ DECLSPEC int SDLCALL SDL_PollEvent(SDL_Event * event) {
     FINDSDL(realf, SDL_PollEvent);
     int ret = realf(event);
     if (ret == 1) {
-        // printf("event %d\n", event->type);
         if (event->type == SDL_WINDOWEVENT) {
             // printf("blocking\n");
             return 0;
         }
+        if (event->type == SDL_JOYAXISMOTION    ||
+            event->type == SDL_JOYBALLMOTION    ||
+            event->type == SDL_JOYHATMOTION     ||
+            event->type == SDL_JOYBUTTONDOWN    ||
+            event->type == SDL_JOYBUTTONUP      ||
+            event->type == SDL_JOYDEVICEADDED   ||
+            event->type == SDL_JOYDEVICEREMOVED ||
+            event->type == SDL_CONTROLLERAXISMOTION    ||
+            event->type == SDL_CONTROLLERBUTTONDOWN    ||
+            event->type == SDL_CONTROLLERBUTTONUP      ||
+            event->type == SDL_CONTROLLERDEVICEADDED   ||
+            event->type == SDL_CONTROLLERDEVICEREMOVED ||
+            event->type == SDL_CONTROLLERDEVICEREMAPPED) {
+            return 0;
+        }        
         if (event->type == SDL_KEYDOWN || event->type == SDL_KEYUP) {
             event->key.keysym.sym = 0;
             if (event->key.keysym.scancode == SDLK_LCTRL) {
@@ -561,6 +595,74 @@ DECLSPEC const Uint8 *SDLCALL SDL_GetKeyboardState(int *numkeys) {
     *numkeys = 256;
     return keystate;
 }
+
+// =========================================================================
+// ATTIC: SDL joystick/controller hide (disabled — kept for future use).
+//
+// Context: AYN Thor / Retroid users reported that toggling the firmware
+// controller-layout setting (Standard / Xbox / Off) causes every face button
+// to register as BOTH PICO-8 ❎ and 🅾️. Investigation revealed that proot
+// bind-mounts the host /dev (see start_pico_proot.sh), so SDL inside the
+// chroot reads /dev/input/event* directly and runs its full Linux joystick
+// stack independently of Godot. That gives PICO-8 two parallel input paths:
+//
+//   1. Controller → Godot → vkb_setstate → keyboard event via our input pipe
+//   2. Controller → /dev/input/event* → SDL inside proot → poll button state
+//
+// When SDL's gamecontrollerdb mapping for a controller agrees with Godot's
+// key mapping, both paths hit the same PICO-8 button and nobody notices.
+// When they disagree (the AYN Thor / Retroid case), the user sees BOTH
+// PICO-8 buttons light up for a single press.
+//
+// The hooks below hide all physical controllers from PICO-8, forcing all
+// controller input through the Godot → pipe → keyboard path. When we
+// shipped these to the affected user, the symptom persisted, meaning the
+// duplicate is *also* happening at the Godot level (likely dual
+// InputEventJoypadButton dispatch on a single Android KeyEvent after the
+// firmware re-enumerates the device). Without hardware access we can't
+// verify which side of the architecture is generating the second event,
+// so the hooks are parked here until we can test on a real device.
+//
+// To re-enable: change `#if 0` to `#if 1`.
+//
+// What enabling does:
+//   - SDL_NumJoysticks returns 0 → PICO-8's enumeration finds zero
+//     controllers and never opens any joystick. SDL_GameControllerGetButton
+//     and friends never report a press.
+//   - SDL_IsGameController returns SDL_FALSE → defensive in case PICO-8
+//     queries by index without going through SDL_NumJoysticks first.
+//   - SDL_PollEvent filter (in the wrapper above, near SDL_WINDOWEVENT):
+//     drops any joypad/controller events SDL may have queued internally
+//     before PICO-8 sees them. The event-type checks would go alongside
+//     the existing `if (event->type == SDL_WINDOWEVENT) return 0;` line.
+// =========================================================================
+#if 1
+DECLSPEC int SDLCALL SDL_NumJoysticks(void) {
+    return 0;
+}
+
+DECLSPEC SDL_bool SDLCALL SDL_IsGameController(int device_index) {
+    return SDL_FALSE;
+}
+
+// And inside the SDL_PollEvent wrapper, after the SDL_WINDOWEVENT check:
+//
+//     if (event->type == SDL_JOYAXISMOTION    ||
+//         event->type == SDL_JOYBALLMOTION    ||
+//         event->type == SDL_JOYHATMOTION     ||
+//         event->type == SDL_JOYBUTTONDOWN    ||
+//         event->type == SDL_JOYBUTTONUP      ||
+//         event->type == SDL_JOYDEVICEADDED   ||
+//         event->type == SDL_JOYDEVICEREMOVED ||
+//         event->type == SDL_CONTROLLERAXISMOTION    ||
+//         event->type == SDL_CONTROLLERBUTTONDOWN    ||
+//         event->type == SDL_CONTROLLERBUTTONUP      ||
+//         event->type == SDL_CONTROLLERDEVICEADDED   ||
+//         event->type == SDL_CONTROLLERDEVICEREMOVED ||
+//         event->type == SDL_CONTROLLERDEVICEREMAPPED) {
+//         return 0;
+//     }
+#endif
 
 // static bool recursive_malloc = false;
 // void *malloc (size_t __size) {

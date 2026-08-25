@@ -117,17 +117,21 @@ func _launch_pico8(target_path: String) -> void:
 	
 	var pkg_path = PicoBootManager.APPDATA_FOLDER + "/package"
 	var env_setup = "export HOME=" + pkg_path + "; "
-	var run_arg = " -splore"
+	var start_with_splore = PicoBootManager.get_setting("settings", "start_with_splore", true)
+	var run_arg = " -splore" if start_with_splore else ""
 	var extra_bind_export = ""
 	var root_bind_export = ""
 	var bbs_bind_export = ""
 
 
 	if target_path.is_empty():
+		# Root path is meaningful for both splore (browses this dir) and command
+		# prompt (typing `splore` uses this dir), so always set it.
 		run_arg += " -root_path /home/public/data/carts"
 	else:
 		var fname_lower = target_path.get_file().to_lower()
 		if fname_lower == "splore.p8" or fname_lower == "splore.p8.png":
+			# Special "user asked for splore" filename — force splore regardless of setting.
 			run_arg = " -splore"
 		elif target_path.begins_with(PicoBootManager.PUBLIC_FOLDER):
 			run_arg = " -run " + target_path.replace(PicoBootManager.PUBLIC_FOLDER, "/home/public")

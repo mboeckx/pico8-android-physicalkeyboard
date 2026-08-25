@@ -3,3 +3,4 @@ package.dat
 .vscode/
 test-data/
 logs/
+release_notes*.md

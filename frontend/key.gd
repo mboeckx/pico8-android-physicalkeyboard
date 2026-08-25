@@ -104,7 +104,6 @@ func _gui_input(event: InputEvent) -> void:
 		return # Block normal input
 
 	if event is InputEventScreenTouch or event is InputEventMouseButton:
-		# print(event)
 		if event.pressed:
 			if key_state == KeyState.RELEASED:
 				if can_lock and (event.double_tap if (event is InputEventScreenTouch) else event.double_click):
