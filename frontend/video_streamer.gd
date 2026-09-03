@@ -1597,6 +1597,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		if input_blocked:
 			return
 			
+		# Physical keyboard add-on: D-pad mapping for splore/games and the
+		# re-bindable editor shortcuts. Opt-in and self-contained; returns true
+		# only when it has fully handled the key (see physical_keyboard.gd).
+		if PhysKeyboard.handle_key_event(self, event, current_navstate):
+			return
+
 		# because i keep doing this lolol
 		if event.keycode == KEY_ALT:
 			return

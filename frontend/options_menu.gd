@@ -83,6 +83,8 @@ func _ready() -> void:
 	%ButtonTheme.pressed.connect(_on_theme_button_pressed)
 	%ThemeSelect.item_selected.connect(_on_theme_selected)
 	%ButtonConnectedControllers.pressed.connect(_on_connected_controllers_pressed)
+	# Physical keyboard add-on: adds its own row under "Manage Controllers".
+	PhysKeyboard.install_options_row(self)
 	%ButtonBgColor.pressed.connect(func(): %ColorPickerBG.get_popup().popup_centered())
 	%ColorPickerBG.get_popup().about_to_popup.connect(close_menu)
 	
@@ -410,6 +412,9 @@ func _update_layout():
 
 	# 5a. Connected Controllers Row
 	%ButtonConnectedControllers.add_theme_font_size_override("font_size", dynamic_font_size)
+
+	# 5b. Physical Keyboard Row
+	PhysKeyboard.style_options_row(dynamic_font_size)
 
 	# 6. Background Color Row
 	_style_option_row(%ButtonBgColor, %ColorPickerBG, $SlidePanel/ScrollContainer/VBoxContainer/SectionDisplay/ContainerDisplay/ContentDisplay/BgColorRow/WrapperBgColor, dynamic_font_size, scale_factor)
