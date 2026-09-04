@@ -52,6 +52,7 @@ This fork introduces several enhancements to improve the experience on Android d
 *   **Custom Color Calibration:** Take control over the visual profile by adjusting color parameters to your preference.
 *   **Custom Layout Adjustments:** Move and zoom the on-screen controls to adjust them to your preferences.
 *   **Controller Mapping:** Easily map your controller buttons if they aren't recognized correctly. Check the [wiki](https://github.com/Macs75/pico8-android/wiki/Controller-Mapping) for more details.
+*   **Physical Keyboard Support:** For devices with a built-in hardware QWERTY (Unihertz Titan, BlackBerry-style keyboards, bluetooth keyboards). *Options > Controls > Keyboard Mapping* maps plain keys to the D-pad and buttons for Splore and games (WASD / O / P / Q by default, only where PICO-8 isn't taking text input), and lets you re-bind or disable PICO-8's built-in editor shortcuts — useful when the keyboard has no ESC, no number row and no F-keys. Bindings used by more than one action are highlighted with the other action's name.
 
 
 ## 📂 Project Structure

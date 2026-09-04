@@ -760,7 +760,16 @@ func _process(delta: float) -> void:
 	if screen_pos.x == 1:
 		screen_pos.x = 0
 
-	var current_mouse_state = [screen_pos.x, screen_pos.y, current_mouse_mask]
+	# "Hide cursor": PICO-8 draws its pointer wherever we report the mouse to
+	# be, so the closest we can get to hiding it — without leaving the 0..127
+	# range this clamp exists to enforce — is parking it in the bottom-left
+	# corner and stopping button reports.
+	var mouse_mask := current_mouse_mask
+	if PhysKeyboard.hide_cursor:
+		screen_pos = Vector2i(0, 127)
+		mouse_mask = 0
+
+	var current_mouse_state = [screen_pos.x, screen_pos.y, mouse_mask]
 	if current_mouse_state != last_mouse_state:
 		# Add to local buffer (Batching)
 		_main_thread_input_buffer.append([
@@ -1128,7 +1137,29 @@ static func is_system_landscape() -> bool:
 var input_blocked: bool = false
 
 func set_input_blocked(blocked: bool):
+	if blocked:
+		release_all_input()
 	input_blocked = blocked
+
+# Input can be taken away mid-press: the options menu opens on a left-edge
+# swipe and switches our input processing off, dialogs block input. Anything
+# still down at that moment never gets its release, so it stays latched in
+# PICO-8 — and an on-screen key left in HELD re-sends itself every
+# REPEAT_TIME_AFTER ms forever (key.gd:341), which with Escape flickers the
+# screen. So let go of everything before handing input away.
+func release_all_input() -> void:
+	var tree := get_tree()
+	if tree:
+		for node in tree.get_nodes_in_group("pico8_onscreen_keys"):
+			if node.has_method("force_release"):
+				node.force_release()
+
+	# Catch anything that reached held_keys by another route (controller
+	# buttons, the physical keyboard mapping) and was not let go.
+	for id in held_keys.duplicate():
+		held_keys.erase(id)
+		if id in SDL_KEYMAP:
+			send_key(SDL_KEYMAP[id], false, false, keys2sdlmod(held_keys))
 
 # --- Orientation Settings ---
 enum OrientationMode {
@@ -1597,6 +1628,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		if input_blocked:
 			return
 			
+		# Physical keyboard add-on: D-pad mapping for splore/games and the
+		# re-bindable editor shortcuts. Opt-in and self-contained; returns true
+		# only when it has fully handled the key (see physical_keyboard.gd).
+		if PhysKeyboard.handle_key_event(self, event, current_navstate):
+			return
+
 		# because i keep doing this lolol
 		if event.keycode == KEY_ALT:
 			return
