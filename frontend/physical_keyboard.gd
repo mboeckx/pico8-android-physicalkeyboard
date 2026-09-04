@@ -63,9 +63,11 @@ enum GameMode { OFF = 0, AUTO = 1, ALWAYS = 2 }
 #   MODE_SHORTCUT a PICO-8 chord. Re-bindable (we replay the original chord)
 #                 and disable-able (we swallow the original chord).
 #   MODE_KEY      a plain key the device may not have. Re-bindable only.
+#   MODE_APP      handled here in the frontend, never forwarded to PICO-8.
 const MODE_GAME := "game"
 const MODE_SHORTCUT := "shortcut"
 const MODE_KEY := "key"
+const MODE_APP := "app"
 
 # "native" is what PICO-8 itself listens for; "default" is our suggested
 # re-binding for a keyboard that cannot produce "native".
@@ -127,6 +129,10 @@ const ACTIONS: Array = [
 	{"id": "k_9", "name": "Type 9", "mode": MODE_KEY, "native": "9", "char": "9"},
 	{"id": "k_0", "name": "Type 0", "mode": MODE_KEY, "native": "0", "char": "0"},
 
+	{"section": "This app"},
+	{"id": "app_cursor", "name": "Hide cursor", "mode": MODE_APP,
+		"hint": "toggles the Hide cursor option above"},
+
 	{"section": "Symbols"},
 	{"id": "s_lparen", "name": "Type (", "mode": MODE_KEY, "native": "Shift+9", "char": "("},
 	{"id": "s_rparen", "name": "Type )", "mode": MODE_KEY, "native": "Shift+0", "char": ")"},
@@ -162,6 +168,7 @@ const ACTIONS: Array = [
 
 static var enabled: bool = false
 static var game_mode: int = GameMode.AUTO
+static var hide_cursor: bool = false
 static var binds: Dictionary = {}    # action id -> chord string ("" = unbound)
 static var blocked: Dictionary = {}  # action id -> bool (MODE_SHORTCUT only)
 
@@ -185,6 +192,7 @@ static func ensure_loaded() -> void:
 	if cfg is Dictionary:
 		enabled = bool(cfg.get("enabled", false))
 		game_mode = int(cfg.get("game_mode", GameMode.AUTO))
+		hide_cursor = bool(cfg.get("hide_cursor", false))
 		for k in cfg.get("binds", {}):
 			binds[str(k)] = str(cfg["binds"][k])
 		for k in cfg.get("blocked", {}):
@@ -201,6 +209,7 @@ static func save() -> void:
 	PicoBootManager.set_setting(SETTINGS_SECTION, SETTINGS_KEY, {
 		"enabled": enabled,
 		"game_mode": game_mode,
+		"hide_cursor": hide_cursor,
 		"binds": binds,
 		"blocked": blocked,
 	})
@@ -260,6 +269,12 @@ static func set_blocked(action_id: String, value: bool) -> void:
 static func set_enabled(value: bool) -> void:
 	ensure_loaded()
 	enabled = value
+	save()
+
+
+static func set_hide_cursor(value: bool) -> void:
+	ensure_loaded()
+	hide_cursor = value
 	save()
 
 
@@ -388,7 +403,13 @@ static func handle_key_event(streamer, event: InputEventKey, navstate: int) -> b
 	# 1. User re-bindings (live everywhere, including the editor).
 	if _bind_lookup.has(code):
 		if event.pressed:
-			_emit_action(streamer, _bind_lookup[code], event)
+			var hit: String = _bind_lookup[code]
+			if str(_by_id.get(hit, {}).get("mode", "")) == MODE_APP:
+				# Ours to act on, and only once per press.
+				if not event.echo:
+					_run_app_action(hit)
+			else:
+				_emit_action(streamer, hit, event)
 		return true
 
 	# 2. PICO-8 shortcuts the user switched off.
@@ -404,6 +425,12 @@ static func handle_key_event(streamer, event: InputEventKey, navstate: int) -> b
 		return true
 
 	return false
+
+
+static func _run_app_action(action_id: String) -> void:
+	match action_id:
+		"app_cursor":
+			set_hide_cursor(not hide_cursor)
 
 
 static func _sdl_id(keycode: int) -> String:
