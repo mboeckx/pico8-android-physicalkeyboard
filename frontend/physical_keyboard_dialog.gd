@@ -9,7 +9,8 @@ const COLOR_WARN := Color(1.0, 0.72, 0.2)
 const COLOR_UNBOUND := Color(0.5, 0.5, 0.5)
 
 var _font_size: int = 20
-var _rows: Array = []          # [{ id, bind_btn, sub_label, block_box }]
+var _scale_factor: float = 1.2
+var _rows: Array = []          # [{ id, bind_btn, clear_btn, sub, block }]
 var _capture_id: String = ""
 var _enable_btn: CheckButton = null
 var _mode_opt: OptionButton = null
@@ -27,6 +28,8 @@ func _ready() -> void:
 
 	var viewport := get_viewport_rect().size
 	_font_size = int(max(16, min(viewport.x, viewport.y) * 0.030))
+	# Same maths options_menu._update_layout uses, so our rows scale like its own.
+	_scale_factor = clampf(_font_size / 10.0, 1.2, 3.0)
 
 	var shade := ColorRect.new()
 	shade.color = Color(0, 0, 0, 0.75)
@@ -58,33 +61,22 @@ func _ready() -> void:
 	root.add_child(_make_label("Physical Keyboard", _font_size + 4, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER))
 
 	# Master switch.
-	var enable_row := HBoxContainer.new()
-	enable_row.add_child(_make_label("Enable mapping", _font_size, Color.WHITE, HORIZONTAL_ALIGNMENT_LEFT, true))
 	_enable_btn = CheckButton.new()
 	_enable_btn.button_pressed = PhysKeyboard.enabled
 	_enable_btn.toggled.connect(func(on): PhysKeyboard.set_enabled(on))
-	enable_row.add_child(_enable_btn)
-	root.add_child(enable_row)
+	root.add_child(_make_setting_row("Enable mapping", _enable_btn))
 
 	# D-pad mode.
-	var mode_row := HBoxContainer.new()
-	mode_row.add_child(_make_label("D-pad mapping", _font_size, Color.WHITE, HORIZONTAL_ALIGNMENT_LEFT, true))
 	_mode_opt = OptionButton.new()
-	_mode_opt.add_theme_font_size_override("font_size", _font_size)
 	_mode_opt.add_item("Off", PhysKeyboard.GameMode.OFF)
 	_mode_opt.add_item("Auto", PhysKeyboard.GameMode.AUTO)
 	_mode_opt.add_item("Always", PhysKeyboard.GameMode.ALWAYS)
 	_mode_opt.selected = clampi(PhysKeyboard.game_mode, 0, 2)
 	_mode_opt.item_selected.connect(func(idx): PhysKeyboard.set_game_mode(idx))
-	mode_row.add_child(_mode_opt)
-	root.add_child(mode_row)
+	root.add_child(_make_setting_row("D-pad mapping", _mode_opt))
 
 	var hint := _make_label(
-		"Auto turns the D-pad keys on in Splore and in games, and off wherever "
-		+ "PICO-8 takes text (console/editor); it needs PICO-8 0.2.7 with "
-		+ "Advanced Features on, otherwise use Always.\n"
-		+ "Tap a binding to record a new one. While recording: Backspace clears "
-		+ "it, tapping the button again cancels.",
+		"Tap a binding to record a new one, or tap it again to cancel.",
 		int(_font_size * 0.72), COLOR_DIM)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	root.add_child(hint)
@@ -145,16 +137,76 @@ func _close() -> void:
 
 # --- Row construction ------------------------------------------------------
 
-func _make_label(text: String, size: int, color: Color, align: int = HORIZONTAL_ALIGNMENT_LEFT, expand: bool = false) -> Label:
+func _make_label(text: String, size: int, color: Color, align: int = HORIZONTAL_ALIGNMENT_LEFT) -> Label:
 	var label := Label.new()
 	label.text = text
 	label.add_theme_font_size_override("font_size", size)
 	label.add_theme_color_override("font_color", color)
 	label.horizontal_alignment = align
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	if expand:
-		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	return label
+
+
+# Builds a label+control row that matches the settings menu, mirroring the
+# maths in options_menu._style_option_row / _style_select_row: a flat Button as
+# the label, and the control scaled inside a fixed-size wrapper.
+func _make_setting_row(text: String, control: Control) -> HBoxContainer:
+	var row := HBoxContainer.new()
+
+	var label_btn := Button.new()
+	label_btn.text = text
+	label_btn.flat = true
+	label_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	label_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label_btn.mouse_filter = Control.MOUSE_FILTER_PASS
+	label_btn.focus_mode = Control.FOCUS_ALL
+	label_btn.add_theme_font_size_override("font_size", _font_size)
+	label_btn.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	label_btn.add_theme_color_override("font_focus_color", Color.WHITE)
+	label_btn.add_theme_color_override("font_pressed_color", Color(0.8, 0.8, 0.8))
+	label_btn.add_theme_color_override("font_hover_color", Color.WHITE)
+	row.add_child(label_btn)
+
+	var wrapper := Control.new()
+	wrapper.size_flags_horizontal = Control.SIZE_SHRINK_END
+	wrapper.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(wrapper)
+	wrapper.add_child(control)
+
+	control.focus_mode = Control.FOCUS_ALL
+	var reserved_width := 70.0
+	var child_scale := _scale_factor
+	var opt := control as OptionButton
+	if opt != null:
+		# Dropdowns get the smaller font and wider well the settings menu uses.
+		opt.add_theme_font_size_override("font_size", int(_font_size * 0.5))
+		reserved_width = 120.0
+		child_scale = _scale_factor * 0.6
+	else:
+		var plain := control as Button
+		if plain != null:
+			plain.text = ""
+
+	control.scale = Vector2(child_scale, child_scale)
+	control.custom_minimum_size = Vector2.ZERO
+	control.size = Vector2.ZERO
+	var natural := control.get_combined_minimum_size()
+	control.size = natural
+
+	var reserved := Vector2(reserved_width * _scale_factor, max(30.0, natural.y) * _scale_factor)
+	wrapper.custom_minimum_size = reserved
+	control.position.y = (reserved.y - natural.y * child_scale) / 2.0
+
+	# Tapping the label works the control, as it does in the settings menu.
+	if opt != null:
+		label_btn.pressed.connect(func():
+			opt.select((opt.selected + 1) % opt.item_count)
+			opt.item_selected.emit(opt.selected))
+	else:
+		var toggle := control as BaseButton
+		if toggle != null:
+			label_btn.pressed.connect(func(): toggle.button_pressed = not toggle.button_pressed)
+	return row
 
 
 func _make_button(text: String) -> Button:
@@ -182,6 +234,16 @@ func _make_action_row(action: Dictionary) -> Control:
 	bind_btn.pressed.connect(_on_bind_pressed.bind(str(action["id"])))
 	row.add_child(bind_btn)
 
+	var clear_btn := _make_button("X")
+	clear_btn.custom_minimum_size.x = _font_size * 2
+	clear_btn.tooltip_text = "Clear this binding"
+	clear_btn.pressed.connect(func():
+		if _capture_id == str(action["id"]):
+			_end_capture()
+		PhysKeyboard.set_bind(str(action["id"]), "")
+		_refresh())
+	row.add_child(clear_btn)
+
 	var block_box: CheckBox = null
 	if action.get("mode", "") == PhysKeyboard.MODE_SHORTCUT:
 		block_box = CheckBox.new()
@@ -201,6 +263,7 @@ func _make_action_row(action: Dictionary) -> Control:
 		"id": str(action["id"]),
 		"action": action,
 		"bind_btn": bind_btn,
+		"clear_btn": clear_btn,
 		"sub": sub,
 		"block": block_box,
 	})
@@ -222,6 +285,7 @@ func _refresh() -> void:
 		var id: String = row["id"]
 		var bind: String = PhysKeyboard.get_bind(id)
 		var button: Button = row["bind_btn"]
+		row["clear_btn"].disabled = bind.is_empty()
 
 		if _capture_id == id:
 			button.text = "press key..."
@@ -276,10 +340,7 @@ func _input(event: InputEvent) -> void:
 		var code: int = event.keycode
 		if code == KEY_CTRL or code == KEY_SHIFT or code == KEY_ALT or code == KEY_META:
 			return  # wait for the key the modifier goes with
-		if code == KEY_BACKSPACE:
-			PhysKeyboard.set_bind(_capture_id, "")
-		else:
-			PhysKeyboard.set_bind(_capture_id, OS.get_keycode_string(event.get_keycode_with_modifiers()))
+		PhysKeyboard.set_bind(_capture_id, OS.get_keycode_string(event.get_keycode_with_modifiers()))
 		_end_capture()
 		_refresh()
 		return
