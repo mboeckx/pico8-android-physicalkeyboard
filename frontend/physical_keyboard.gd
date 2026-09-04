@@ -131,7 +131,7 @@ const ACTIONS: Array = [
 
 	{"section": "This app"},
 	{"id": "app_cursor", "name": "Hide cursor", "mode": MODE_APP,
-		"hint": "toggles the Hide cursor option above"},
+		"hint": "toggles Options > Controls > Hide Cursor"},
 
 	{"section": "Symbols"},
 	{"id": "s_lparen", "name": "Type (", "mode": MODE_KEY, "native": "Shift+9", "char": "("},
@@ -275,6 +275,9 @@ static func set_enabled(value: bool) -> void:
 static func set_hide_cursor(value: bool) -> void:
 	ensure_loaded()
 	hide_cursor = value
+	# The bindable shortcut can flip this while the menu is closed.
+	if is_instance_valid(_cursor_toggle):
+		_cursor_toggle.set_pressed_no_signal(value)
 	save()
 
 
@@ -500,6 +503,10 @@ static func _emit_action(streamer, action_id: String, event: InputEventKey) -> v
 static var _options_button: Button = null
 static var _options_row: Control = null
 static var _options_menu: Node = null
+static var _cursor_row: Control = null
+static var _cursor_label: Button = null
+static var _cursor_wrapper: Control = null
+static var _cursor_toggle: CheckButton = null
 
 
 # Adds a "Keyboard Mapping" row underneath "Manage Controllers".
@@ -530,6 +537,49 @@ static func install_options_row(menu: Node) -> void:
 	_options_menu = menu
 	button.pressed.connect(func(): PhysKeyboard.open_dialog(menu))
 
+	_install_cursor_row(container, row)
+
+
+# "Hide cursor" toggle, cloned from an existing toggle row so it inherits the
+# scene's styling for free. options_menu._style_option_row only touches its own
+# unique-named nodes, so the sizing is done in style_options_row() below.
+static func _install_cursor_row(container: Node, after: Node) -> void:
+	var template: Control = container.get_node_or_null("KeyboardRow")
+	if template == null or container.has_node("HideCursorRow"):
+		return
+
+	var crow: Control = template.duplicate(Node.DUPLICATE_GROUPS | Node.DUPLICATE_SCRIPTS)
+	crow.name = "HideCursorRow"
+	var label: Button = crow.get_node_or_null("ButtonKeyboard")
+	var wrapper: Control = crow.get_node_or_null("WrapperKeyboard")
+	if label == null or wrapper == null:
+		crow.queue_free()
+		return
+	var toggle: CheckButton = wrapper.get_node_or_null("ToggleKeyboard")
+	if toggle == null:
+		crow.queue_free()
+		return
+
+	label.unique_name_in_owner = false
+	toggle.unique_name_in_owner = false
+	label.name = "ButtonHideCursor"
+	wrapper.name = "WrapperHideCursor"
+	toggle.name = "ToggleHideCursor"
+
+	label.text = "Hide Cursor"
+	label.tooltip_text = "Park PICO-8's mouse pointer in the corner and stop reporting clicks"
+	toggle.button_pressed = hide_cursor
+	toggle.toggled.connect(func(on): PhysKeyboard.set_hide_cursor(on))
+	label.pressed.connect(func(): toggle.button_pressed = not toggle.button_pressed)
+
+	container.add_child(crow)
+	container.move_child(crow, after.get_index() + 1)
+
+	_cursor_row = crow
+	_cursor_label = label
+	_cursor_wrapper = wrapper
+	_cursor_toggle = toggle
+
 
 static func style_options_row(font_size: int) -> void:
 	if not is_instance_valid(_options_button):
@@ -552,6 +602,28 @@ static func style_options_row(font_size: int) -> void:
 		var neighbour = _options_row.get_parent().get_node_or_null("ConnectedControllersRow")
 		if neighbour is Control:
 			neighbour.custom_minimum_size.y = reserved
+
+	# Same maths as options_menu._style_option_row, which does not know about
+	# this row because its nodes are not unique-named in the scene.
+	if is_instance_valid(_cursor_label) and is_instance_valid(_cursor_toggle) \
+			and is_instance_valid(_cursor_wrapper):
+		var scale_factor := clampf(font_size / 10.0, 1.2, 3.0)
+		_cursor_label.add_theme_font_size_override("font_size", font_size)
+		_cursor_toggle.text = ""
+		_cursor_toggle.remove_theme_font_size_override("font_size")
+		_cursor_toggle.scale = Vector2(scale_factor, scale_factor)
+		_cursor_toggle.custom_minimum_size = Vector2.ZERO
+		_cursor_toggle.size = Vector2.ZERO
+		var natural := _cursor_toggle.get_combined_minimum_size()
+		_cursor_toggle.size = natural
+		var reserved_h := max(30.0, natural.y) * scale_factor
+		_cursor_wrapper.custom_minimum_size = Vector2(70.0 * scale_factor, reserved_h)
+		_cursor_toggle.position.y = (reserved_h - natural.y * scale_factor) / 2.0
+		_cursor_label.focus_mode = Control.FOCUS_ALL
+		_cursor_toggle.focus_mode = Control.FOCUS_ALL
+		_cursor_label.focus_neighbor_right = _cursor_toggle.get_path()
+		_cursor_toggle.focus_neighbor_left = _cursor_label.get_path()
+		_cursor_toggle.set_pressed_no_signal(hide_cursor)
 
 
 static var _dialog: Node = null

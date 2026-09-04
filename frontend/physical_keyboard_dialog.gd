@@ -14,7 +14,6 @@ var _rows: Array = []          # [{ id, bind_btn, clear_btn, sub, block }]
 var _capture_id: String = ""
 var _enable_btn: CheckButton = null
 var _mode_opt: OptionButton = null
-var _cursor_btn: CheckButton = null
 
 
 func _init() -> void:
@@ -75,13 +74,6 @@ func _ready() -> void:
 	_mode_opt.selected = clampi(PhysKeyboard.game_mode, 0, 2)
 	_mode_opt.item_selected.connect(func(idx): PhysKeyboard.set_game_mode(idx))
 	root.add_child(_make_setting_row("D-pad mapping", _mode_opt))
-
-	# PICO-8 always draws its pointer wherever we report the mouse to be, so
-	# "hiding" it means parking it in a corner — see video_streamer.gd.
-	_cursor_btn = CheckButton.new()
-	_cursor_btn.button_pressed = PhysKeyboard.hide_cursor
-	_cursor_btn.toggled.connect(func(on): PhysKeyboard.set_hide_cursor(on))
-	root.add_child(_make_setting_row("Hide cursor", _cursor_btn))
 
 	var hint := _make_label(
 		"Tap a binding to record a new one, or tap it again to cancel.",
@@ -287,8 +279,6 @@ func _refresh() -> void:
 		_enable_btn.set_pressed_no_signal(PhysKeyboard.enabled)
 	if _mode_opt:
 		_mode_opt.selected = clampi(PhysKeyboard.game_mode, 0, 2)
-	if _cursor_btn:
-		_cursor_btn.set_pressed_no_signal(PhysKeyboard.hide_cursor)
 
 	for row in _rows:
 		var action: Dictionary = row["action"]
