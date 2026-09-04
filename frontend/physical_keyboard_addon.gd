@@ -27,7 +27,10 @@ const MODULE_PATH := "res://physical_keyboard.gd"
 const OPTIONS_MENU_PATH := "/root/Main/OptionsMenu"
 const KEY_GROUP := "physkb_onscreen_keys"
 
-var _module: GDScript = null
+# Deliberately untyped: the calls below are static functions on the loaded
+# script. Typing this as GDScript would make the analyzer check them against
+# the GDScript class, which does not have them, and fail to parse.
+var _module = null
 var _row_installed := false
 var _keys_scanned := false
 
@@ -36,7 +39,7 @@ func _ready() -> void:
 	# Loaded by path, not by class name: a failure here leaves _module null and
 	# every use below no-ops, instead of taking the rest of the project with it.
 	if ResourceLoader.exists(MODULE_PATH):
-		_module = load(MODULE_PATH) as GDScript
+		_module = load(MODULE_PATH)
 	if _module == null:
 		push_warning("physical keyboard add-on: module unavailable, staying inert")
 		set_process(false)
