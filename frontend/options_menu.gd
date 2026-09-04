@@ -83,8 +83,6 @@ func _ready() -> void:
 	%ButtonTheme.pressed.connect(_on_theme_button_pressed)
 	%ThemeSelect.item_selected.connect(_on_theme_selected)
 	%ButtonConnectedControllers.pressed.connect(_on_connected_controllers_pressed)
-	# Physical keyboard add-on: adds its own row under "Manage Controllers".
-	PhysKeyboard.install_options_row(self)
 	%ButtonBgColor.pressed.connect(func(): %ColorPickerBG.get_popup().popup_centered())
 	%ColorPickerBG.get_popup().about_to_popup.connect(close_menu)
 	
@@ -261,6 +259,11 @@ func _ready() -> void:
 	_on_section_toggled(%BtnAudioToggle, %ContainerAudio)
 	_on_section_toggled(%BtnOfflineToggle, %ContainerOffline)
 
+	# Physical keyboard add-on: appends its own row to the Controls section.
+	# Deferred and last on purpose — it runs outside this _ready(), so nothing
+	# it does can interrupt the setup above.
+	PhysKeyboard.call_deferred("install_options_row", self)
+
 func _update_layout_deferred():
 	call_deferred("_update_layout")
 
@@ -412,9 +415,6 @@ func _update_layout():
 
 	# 5a. Connected Controllers Row
 	%ButtonConnectedControllers.add_theme_font_size_override("font_size", dynamic_font_size)
-
-	# 5b. Physical Keyboard Row
-	PhysKeyboard.style_options_row(dynamic_font_size)
 
 	# 6. Background Color Row
 	_style_option_row(%ButtonBgColor, %ColorPickerBG, $SlidePanel/ScrollContainer/VBoxContainer/SectionDisplay/ContainerDisplay/ContentDisplay/BgColorRow/WrapperBgColor, dynamic_font_size, scale_factor)
@@ -782,9 +782,6 @@ func open_menu():
 	if PicoVideoStreamer.instance:
 		# Only disable input if still open (prevents race with fast toggling)
 		if is_open:
-			# The edge swipe that opens us may have started on a key; without
-			# this it never sees its release and repeats forever.
-			PicoVideoStreamer.instance.release_all_input()
 			PicoVideoStreamer.instance.set_process_unhandled_input(false)
 			PicoVideoStreamer.instance.set_process_input(false)
 

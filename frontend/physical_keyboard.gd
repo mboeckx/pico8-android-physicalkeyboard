@@ -23,8 +23,7 @@ class_name PhysKeyboard
 # Everything lives here and in physical_keyboard_dialog.gd. The rest of the
 # frontend only calls:
 #     PhysKeyboard.handle_key_event(...)   -> video_streamer.gd
-#     PhysKeyboard.install_options_row(...) / style_options_row(...)
-#                                          -> options_menu.gd
+#     PhysKeyboard.install_options_row(...) -> options_menu.gd (deferred)
 #
 # Shortcut reference: https://pico-8.fandom.com/wiki/Keyboard_Shortcuts
 # =============================================================================
@@ -63,11 +62,9 @@ enum GameMode { OFF = 0, AUTO = 1, ALWAYS = 2 }
 #   MODE_SHORTCUT a PICO-8 chord. Re-bindable (we replay the original chord)
 #                 and disable-able (we swallow the original chord).
 #   MODE_KEY      a plain key the device may not have. Re-bindable only.
-#   MODE_APP      handled here in the frontend, never forwarded to PICO-8.
 const MODE_GAME := "game"
 const MODE_SHORTCUT := "shortcut"
 const MODE_KEY := "key"
-const MODE_APP := "app"
 
 # "native" is what PICO-8 itself listens for; "default" is our suggested
 # re-binding for a keyboard that cannot produce "native".
@@ -129,10 +126,6 @@ const ACTIONS: Array = [
 	{"id": "k_9", "name": "Type 9", "mode": MODE_KEY, "native": "9", "char": "9"},
 	{"id": "k_0", "name": "Type 0", "mode": MODE_KEY, "native": "0", "char": "0"},
 
-	{"section": "This app"},
-	{"id": "app_cursor", "name": "Hide cursor", "mode": MODE_APP,
-		"hint": "toggles Options > Controls > Hide Cursor"},
-
 	{"section": "Symbols"},
 	{"id": "s_lparen", "name": "Type (", "mode": MODE_KEY, "native": "Shift+9", "char": "("},
 	{"id": "s_rparen", "name": "Type )", "mode": MODE_KEY, "native": "Shift+0", "char": ")"},
@@ -168,7 +161,6 @@ const ACTIONS: Array = [
 
 static var enabled: bool = false
 static var game_mode: int = GameMode.AUTO
-static var hide_cursor: bool = false
 static var binds: Dictionary = {}    # action id -> chord string ("" = unbound)
 static var blocked: Dictionary = {}  # action id -> bool (MODE_SHORTCUT only)
 
@@ -192,7 +184,6 @@ static func ensure_loaded() -> void:
 	if cfg is Dictionary:
 		enabled = bool(cfg.get("enabled", false))
 		game_mode = int(cfg.get("game_mode", GameMode.AUTO))
-		hide_cursor = bool(cfg.get("hide_cursor", false))
 		for k in cfg.get("binds", {}):
 			binds[str(k)] = str(cfg["binds"][k])
 		for k in cfg.get("blocked", {}):
@@ -209,7 +200,6 @@ static func save() -> void:
 	PicoBootManager.set_setting(SETTINGS_SECTION, SETTINGS_KEY, {
 		"enabled": enabled,
 		"game_mode": game_mode,
-		"hide_cursor": hide_cursor,
 		"binds": binds,
 		"blocked": blocked,
 	})
@@ -269,15 +259,6 @@ static func set_blocked(action_id: String, value: bool) -> void:
 static func set_enabled(value: bool) -> void:
 	ensure_loaded()
 	enabled = value
-	save()
-
-
-static func set_hide_cursor(value: bool) -> void:
-	ensure_loaded()
-	hide_cursor = value
-	# The bindable shortcut can flip this while the menu is closed.
-	if is_instance_valid(_cursor_toggle):
-		_cursor_toggle.set_pressed_no_signal(value)
 	save()
 
 
@@ -406,13 +387,7 @@ static func handle_key_event(streamer, event: InputEventKey, navstate: int) -> b
 	# 1. User re-bindings (live everywhere, including the editor).
 	if _bind_lookup.has(code):
 		if event.pressed:
-			var hit: String = _bind_lookup[code]
-			if str(_by_id.get(hit, {}).get("mode", "")) == MODE_APP:
-				# Ours to act on, and only once per press.
-				if not event.echo:
-					_run_app_action(hit)
-			else:
-				_emit_action(streamer, hit, event)
+			_emit_action(streamer, _bind_lookup[code], event)
 		return true
 
 	# 2. PICO-8 shortcuts the user switched off.
@@ -428,12 +403,6 @@ static func handle_key_event(streamer, event: InputEventKey, navstate: int) -> b
 		return true
 
 	return false
-
-
-static func _run_app_action(action_id: String) -> void:
-	match action_id:
-		"app_cursor":
-			set_hide_cursor(not hide_cursor)
 
 
 static func _sdl_id(keycode: int) -> String:
@@ -499,131 +468,68 @@ static func _emit_action(streamer, action_id: String, event: InputEventKey) -> v
 
 
 # --- Options menu integration ----------------------------------------------
+#
+# Deliberately additive: this appends one row to the Controls section and
+# touches nothing that is already there. It never restyles, resizes or reorders
+# an existing row, and options_menu.gd calls it deferred from the very end of
+# its _ready(), so a failure here cannot interrupt the menu's own setup.
 
 static var _options_button: Button = null
-static var _options_row: Control = null
-static var _options_menu: Node = null
-static var _cursor_row: Control = null
-static var _cursor_label: Button = null
-static var _cursor_wrapper: Control = null
-static var _cursor_toggle: CheckButton = null
 
 
-# Adds a "Keyboard Mapping" row underneath "Manage Controllers".
 static func install_options_row(menu: Node) -> void:
-	ensure_loaded()
 	var template: Button = menu.get_node_or_null("%ButtonConnectedControllers")
-	if template == null or not is_instance_valid(template.get_parent()):
+	if template == null:
 		return
 	var anchor: Node = template.get_parent()
+	if anchor == null:
+		return
 	var container: Node = anchor.get_parent()
 	if container == null or container.has_node("PhysicalKeyboardRow"):
 		return
 
 	var row := HBoxContainer.new()
 	row.name = "PhysicalKeyboardRow"
-	# No DUPLICATE_SIGNALS: we only want the row's look, not its handler.
-	var button: Button = template.duplicate(Node.DUPLICATE_GROUPS | Node.DUPLICATE_SCRIPTS)
+
+	# Same properties the scene gives "Manage Controllers", set explicitly so
+	# we neither read from nor modify that node.
+	var button := Button.new()
 	button.name = "ButtonPhysicalKeyboard"
-	button.unique_name_in_owner = false
 	button.text = "Keyboard Mapping"
 	button.tooltip_text = "Map a physical/bluetooth keyboard and re-bind PICO-8's editor shortcuts"
+	button.flat = true
+	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.mouse_filter = Control.MOUSE_FILTER_PASS
+	button.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	button.add_theme_color_override("font_focus_color", Color(1, 1, 1))
+	button.add_theme_color_override("font_pressed_color", Color(0.8, 0.8, 0.8))
+	button.add_theme_color_override("font_hover_color", Color(1, 1, 1))
+	button.pressed.connect(func(): PhysKeyboard.open_dialog(menu))
+
 	row.add_child(button)
 	container.add_child(row)
 	container.move_child(row, anchor.get_index() + 1)
 
 	_options_button = button
-	_options_row = row
-	_options_menu = menu
-	button.pressed.connect(func(): PhysKeyboard.open_dialog(menu))
+	_apply_options_font()
 
-	_install_cursor_row(container, row)
-
-
-# "Hide cursor" toggle, cloned from an existing toggle row so it inherits the
-# scene's styling for free. options_menu._style_option_row only touches its own
-# unique-named nodes, so the sizing is done in style_options_row() below.
-static func _install_cursor_row(container: Node, after: Node) -> void:
-	var template: Control = container.get_node_or_null("KeyboardRow")
-	if template == null or container.has_node("HideCursorRow"):
-		return
-
-	var crow: Control = template.duplicate(Node.DUPLICATE_GROUPS | Node.DUPLICATE_SCRIPTS)
-	crow.name = "HideCursorRow"
-	var label: Button = crow.get_node_or_null("ButtonKeyboard")
-	var wrapper: Control = crow.get_node_or_null("WrapperKeyboard")
-	if label == null or wrapper == null:
-		crow.queue_free()
-		return
-	var toggle: CheckButton = wrapper.get_node_or_null("ToggleKeyboard")
-	if toggle == null:
-		crow.queue_free()
-		return
-
-	label.unique_name_in_owner = false
-	toggle.unique_name_in_owner = false
-	label.name = "ButtonHideCursor"
-	wrapper.name = "WrapperHideCursor"
-	toggle.name = "ToggleHideCursor"
-
-	label.text = "Hide Cursor"
-	label.tooltip_text = "Park PICO-8's mouse pointer in the corner and stop reporting clicks"
-	toggle.button_pressed = hide_cursor
-	toggle.toggled.connect(func(on): PhysKeyboard.set_hide_cursor(on))
-	label.pressed.connect(func(): toggle.button_pressed = not toggle.button_pressed)
-
-	container.add_child(crow)
-	container.move_child(crow, after.get_index() + 1)
-
-	_cursor_row = crow
-	_cursor_label = label
-	_cursor_wrapper = wrapper
-	_cursor_toggle = toggle
+	# Follow the viewport ourselves rather than asking options_menu to style us.
+	var tree := menu.get_tree()
+	if tree and not tree.root.size_changed.is_connected(_apply_options_font):
+		tree.root.size_changed.connect(_apply_options_font)
 
 
-static func style_options_row(font_size: int) -> void:
+# Mirrors the font size options_menu._update_layout computes for its own rows.
+static func _apply_options_font() -> void:
 	if not is_instance_valid(_options_button):
 		return
+	var vp := _options_button.get_viewport()
+	if vp == null:
+		return
+	var size := vp.get_visible_rect().size
+	var font_size := int(max(12, min(size.x, size.y) * 0.03))
 	_options_button.add_theme_font_size_override("font_size", font_size)
-
-	# A row holding nothing but a button is shorter than the toggle rows, whose
-	# wrapper reserves extra height, so it reads as cramped between them. Copy a
-	# styled wrapper's reserved height onto this row — and onto the equally bare
-	# "Manage Controllers" row above it — so the section spaces evenly.
-	var reserved := 30.0 * clampf(font_size / 10.0, 1.2, 3.0)
-	if is_instance_valid(_options_menu):
-		var probe: Node = _options_menu.get_node_or_null("%ToggleKeyboard")
-		if probe != null and probe.get_parent() is Control:
-			var wrapper: Control = probe.get_parent()
-			if wrapper.custom_minimum_size.y > 0.0:
-				reserved = wrapper.custom_minimum_size.y
-	if is_instance_valid(_options_row):
-		_options_row.custom_minimum_size.y = reserved
-		var neighbour = _options_row.get_parent().get_node_or_null("ConnectedControllersRow")
-		if neighbour is Control:
-			neighbour.custom_minimum_size.y = reserved
-
-	# Same maths as options_menu._style_option_row, which does not know about
-	# this row because its nodes are not unique-named in the scene.
-	if is_instance_valid(_cursor_label) and is_instance_valid(_cursor_toggle) \
-			and is_instance_valid(_cursor_wrapper):
-		var scale_factor := clampf(font_size / 10.0, 1.2, 3.0)
-		_cursor_label.add_theme_font_size_override("font_size", font_size)
-		_cursor_toggle.text = ""
-		_cursor_toggle.remove_theme_font_size_override("font_size")
-		_cursor_toggle.scale = Vector2(scale_factor, scale_factor)
-		_cursor_toggle.custom_minimum_size = Vector2.ZERO
-		_cursor_toggle.size = Vector2.ZERO
-		var natural := _cursor_toggle.get_combined_minimum_size()
-		_cursor_toggle.size = natural
-		var reserved_h := max(30.0, natural.y) * scale_factor
-		_cursor_wrapper.custom_minimum_size = Vector2(70.0 * scale_factor, reserved_h)
-		_cursor_toggle.position.y = (reserved_h - natural.y * scale_factor) / 2.0
-		_cursor_label.focus_mode = Control.FOCUS_ALL
-		_cursor_toggle.focus_mode = Control.FOCUS_ALL
-		_cursor_label.focus_neighbor_right = _cursor_toggle.get_path()
-		_cursor_toggle.focus_neighbor_left = _cursor_label.get_path()
-		_cursor_toggle.set_pressed_no_signal(hide_cursor)
 
 
 static var _dialog: Node = null

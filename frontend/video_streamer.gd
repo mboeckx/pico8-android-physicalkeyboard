@@ -694,6 +694,14 @@ func _process(delta: float) -> void:
 			audio_btn.icon = _icon_volume_off if is_muted else _icon_volume_up
 
 
+	# Input can be taken away mid-press — the options menu opens on a left-edge
+	# swipe and switches our input processing off, dialogs block input — and
+	# whatever was down then never sees its release. It stays latched, and an
+	# on-screen key left HELD re-sends itself every REPEAT_TIME_AFTER ms
+	# (key.gd), which with Escape flickers the screen. Notice and let go.
+	if not held_keys.is_empty() and (input_blocked or not is_processing_unhandled_input()):
+		release_all_input()
+
 	# Input polling and queueing
 	var screen_pos: Vector2i = Vector2i.ZERO
 	
@@ -760,16 +768,7 @@ func _process(delta: float) -> void:
 	if screen_pos.x == 1:
 		screen_pos.x = 0
 
-	# "Hide cursor": PICO-8 draws its pointer wherever we report the mouse to
-	# be, so the closest we can get to hiding it — without leaving the 0..127
-	# range this clamp exists to enforce — is parking it in the bottom-left
-	# corner and stopping button reports.
-	var mouse_mask := current_mouse_mask
-	if PhysKeyboard.hide_cursor:
-		screen_pos = Vector2i(0, 127)
-		mouse_mask = 0
-
-	var current_mouse_state = [screen_pos.x, screen_pos.y, mouse_mask]
+	var current_mouse_state = [screen_pos.x, screen_pos.y, current_mouse_mask]
 	if current_mouse_state != last_mouse_state:
 		# Add to local buffer (Batching)
 		_main_thread_input_buffer.append([
