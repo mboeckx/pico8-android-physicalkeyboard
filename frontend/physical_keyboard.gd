@@ -438,18 +438,25 @@ static func _emit_action(streamer, action_id: String, event: InputEventKey) -> v
 	if want_shift: want_mod |= KMOD_SHIFT
 	if want_alt: want_mod |= KMOD_ALT
 
-	var have_mod := 0
-	if have_ctrl: have_mod |= KMOD_CTRL
-	if have_shift: have_mod |= KMOD_SHIFT
-	if have_alt: have_mod |= KMOD_ALT
+	# Self-contained press/release, the same shape as the frontend's own
+	# _on_audio_btn_pressed(): let go of any modifier the chord does not want,
+	# hold the ones it does, fire, then release everything and end on mod 0.
+	#
+	# We deliberately never re-press a modifier just because it is physically
+	# held. On a keyboard where Ctrl comes from an Fn layer the key event may
+	# carry ctrl_pressed without any standalone Ctrl press/release of its own,
+	# so a re-press would never be matched by a release and would leave Ctrl
+	# latched in PICO-8 — turning every later letter into a chord. PICO-8 reads
+	# the modifier state from the packet's mod mask (shim.c keeps it as
+	# lastmod, which is what SDL_GetModState returns), and ordinary typing
+	# already carries that mask, so chords keep working while it is held.
+	if have_ctrl and not want_ctrl: streamer.send_key(SDL_SC_CTRL, false, false, 0)
+	if have_shift and not want_shift: streamer.send_key(SDL_SC_SHIFT, false, false, 0)
+	if have_alt and not want_alt: streamer.send_key(SDL_SC_ALT, false, false, 0)
 
-	# Drop the modifiers the chord does not want, add the ones it does.
-	if have_ctrl and not want_ctrl: streamer.send_key(SDL_SC_CTRL, false, false, want_mod)
-	if have_shift and not want_shift: streamer.send_key(SDL_SC_SHIFT, false, false, want_mod)
-	if have_alt and not want_alt: streamer.send_key(SDL_SC_ALT, false, false, want_mod)
-	if want_ctrl and not have_ctrl: streamer.send_key(SDL_SC_CTRL, true, false, want_mod)
-	if want_shift and not have_shift: streamer.send_key(SDL_SC_SHIFT, true, false, want_mod)
-	if want_alt and not have_alt: streamer.send_key(SDL_SC_ALT, true, false, want_mod)
+	if want_ctrl: streamer.send_key(SDL_SC_CTRL, true, false, want_mod)
+	if want_shift: streamer.send_key(SDL_SC_SHIFT, true, false, want_mod)
+	if want_alt: streamer.send_key(SDL_SC_ALT, true, false, want_mod)
 
 	streamer.send_key(SDL_KEYMAP[id], true, event.echo, want_mod)
 	# Printable keys also need the text event PICO-8's editors actually read.
@@ -458,13 +465,9 @@ static func _emit_action(streamer, action_id: String, event: InputEventKey) -> v
 		streamer.send_input(printable.unicode_at(0))
 	streamer.send_key(SDL_KEYMAP[id], false, false, want_mod)
 
-	# Put the real modifier state back.
-	if want_ctrl and not have_ctrl: streamer.send_key(SDL_SC_CTRL, false, false, have_mod)
-	if want_shift and not have_shift: streamer.send_key(SDL_SC_SHIFT, false, false, have_mod)
-	if want_alt and not have_alt: streamer.send_key(SDL_SC_ALT, false, false, have_mod)
-	if have_ctrl and not want_ctrl: streamer.send_key(SDL_SC_CTRL, true, false, have_mod)
-	if have_shift and not want_shift: streamer.send_key(SDL_SC_SHIFT, true, false, have_mod)
-	if have_alt and not want_alt: streamer.send_key(SDL_SC_ALT, true, false, have_mod)
+	if want_ctrl: streamer.send_key(SDL_SC_CTRL, false, false, 0)
+	if want_shift: streamer.send_key(SDL_SC_SHIFT, false, false, 0)
+	if want_alt: streamer.send_key(SDL_SC_ALT, false, false, 0)
 
 
 # Lets go of everything the streamer still has latched. Called by the add-on's
