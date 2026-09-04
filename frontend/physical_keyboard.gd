@@ -20,10 +20,10 @@ class_name PhysKeyboard
 #      any chord (we replay PICO-8's original chord for it) or disabled
 #      outright, and KEY actions expose the missing keys themselves.
 #
-# Everything lives here and in physical_keyboard_dialog.gd. The rest of the
-# frontend only calls:
-#     PhysKeyboard.handle_key_event(...)   -> video_streamer.gd
-#     PhysKeyboard.install_options_row(...) -> options_menu.gd (deferred)
+# The feature lives entirely in its own three files — this one, the editor in
+# physical_keyboard_dialog.gd, and the bootstrap in physical_keyboard_addon.gd
+# (an autoload). No existing script references any of them, so removing the
+# three files and the autoload line restores upstream exactly.
 #
 # Shortcut reference: https://pico-8.fandom.com/wiki/Keyboard_Shortcuts
 # =============================================================================
@@ -467,32 +467,42 @@ static func _emit_action(streamer, action_id: String, event: InputEventKey) -> v
 	if have_alt and not want_alt: streamer.send_key(SDL_SC_ALT, true, false, have_mod)
 
 
+# Lets go of everything the streamer still has latched. Called by the add-on's
+# watchdog when input was taken away mid-press.
+static func flush_held_keys(streamer) -> void:
+	for id in streamer.held_keys.duplicate():
+		streamer.held_keys.erase(id)
+		if SDL_KEYMAP.has(id):
+			streamer.send_key(SDL_KEYMAP[id], false, false,
+				streamer.keys2sdlmod(streamer.held_keys))
+
+
 # --- Options menu integration ----------------------------------------------
 #
-# Deliberately additive: this appends one row to the Controls section and
-# touches nothing that is already there. It never restyles, resizes or reorders
-# an existing row, and options_menu.gd calls it deferred from the very end of
-# its _ready(), so a failure here cannot interrupt the menu's own setup.
+# Purely additive: appends one row to the Controls section and touches nothing
+# that is already there — no restyling, resizing or reordering of existing
+# rows. Driven from physical_keyboard_addon.gd, so options_menu.gd itself is
+# untouched. Returns true when the row was added.
 
 static var _options_button: Button = null
 
 
-static func install_options_row(menu: Node) -> void:
+static func install_options_row(menu: Node) -> bool:
 	var template: Button = menu.get_node_or_null("%ButtonConnectedControllers")
 	if template == null:
-		return
+		return false
 	var anchor: Node = template.get_parent()
 	if anchor == null:
-		return
+		return false
 	var container: Node = anchor.get_parent()
 	if container == null or container.has_node("PhysicalKeyboardRow"):
-		return
+		return false
 
 	var row := HBoxContainer.new()
 	row.name = "PhysicalKeyboardRow"
 
-	# Same properties the scene gives "Manage Controllers", set explicitly so
-	# we neither read from nor modify that node.
+	# The same properties the scene gives "Manage Controllers", set explicitly
+	# so we neither read from nor modify that node.
 	var button := Button.new()
 	button.name = "ButtonPhysicalKeyboard"
 	button.text = "Keyboard Mapping"
@@ -510,25 +520,15 @@ static func install_options_row(menu: Node) -> void:
 	row.add_child(button)
 	container.add_child(row)
 	container.move_child(row, anchor.get_index() + 1)
-
 	_options_button = button
-	_apply_options_font()
-
-	# Follow the viewport ourselves rather than asking options_menu to style us.
-	var tree := menu.get_tree()
-	if tree and not tree.root.size_changed.is_connected(_apply_options_font):
-		tree.root.size_changed.connect(_apply_options_font)
+	return true
 
 
 # Mirrors the font size options_menu._update_layout computes for its own rows.
-static func _apply_options_font() -> void:
+static func refresh_options_row(viewport_size: Vector2) -> void:
 	if not is_instance_valid(_options_button):
 		return
-	var vp := _options_button.get_viewport()
-	if vp == null:
-		return
-	var size := vp.get_visible_rect().size
-	var font_size := int(max(12, min(size.x, size.y) * 0.03))
+	var font_size := int(max(12, min(viewport_size.x, viewport_size.y) * 0.03))
 	_options_button.add_theme_font_size_override("font_size", font_size)
 
 

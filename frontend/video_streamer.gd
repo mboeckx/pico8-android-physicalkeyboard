@@ -694,14 +694,6 @@ func _process(delta: float) -> void:
 			audio_btn.icon = _icon_volume_off if is_muted else _icon_volume_up
 
 
-	# Input can be taken away mid-press — the options menu opens on a left-edge
-	# swipe and switches our input processing off, dialogs block input — and
-	# whatever was down then never sees its release. It stays latched, and an
-	# on-screen key left HELD re-sends itself every REPEAT_TIME_AFTER ms
-	# (key.gd), which with Escape flickers the screen. Notice and let go.
-	if not held_keys.is_empty() and (input_blocked or not is_processing_unhandled_input()):
-		release_all_input()
-
 	# Input polling and queueing
 	var screen_pos: Vector2i = Vector2i.ZERO
 	
@@ -1136,29 +1128,7 @@ static func is_system_landscape() -> bool:
 var input_blocked: bool = false
 
 func set_input_blocked(blocked: bool):
-	if blocked:
-		release_all_input()
 	input_blocked = blocked
-
-# Input can be taken away mid-press: the options menu opens on a left-edge
-# swipe and switches our input processing off, dialogs block input. Anything
-# still down at that moment never gets its release, so it stays latched in
-# PICO-8 — and an on-screen key left in HELD re-sends itself every
-# REPEAT_TIME_AFTER ms forever (key.gd:341), which with Escape flickers the
-# screen. So let go of everything before handing input away.
-func release_all_input() -> void:
-	var tree := get_tree()
-	if tree:
-		for node in tree.get_nodes_in_group("pico8_onscreen_keys"):
-			if node.has_method("force_release"):
-				node.force_release()
-
-	# Catch anything that reached held_keys by another route (controller
-	# buttons, the physical keyboard mapping) and was not let go.
-	for id in held_keys.duplicate():
-		held_keys.erase(id)
-		if id in SDL_KEYMAP:
-			send_key(SDL_KEYMAP[id], false, false, keys2sdlmod(held_keys))
 
 # --- Orientation Settings ---
 enum OrientationMode {
@@ -1627,12 +1597,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		if input_blocked:
 			return
 			
-		# Physical keyboard add-on: D-pad mapping for splore/games and the
-		# re-bindable editor shortcuts. Opt-in and self-contained; returns true
-		# only when it has fully handled the key (see physical_keyboard.gd).
-		if PhysKeyboard.handle_key_event(self, event, current_navstate):
-			return
-
 		# because i keep doing this lolol
 		if event.keycode == KEY_ALT:
 			return
