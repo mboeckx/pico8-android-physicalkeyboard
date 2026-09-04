@@ -134,24 +134,7 @@ func _gui_input(event: InputEvent) -> void:
 			KeyState.LOCKED:
 				self.texture = keycap_locked
 
-# Lets the streamer let go of every on-screen key at once — see
-# PicoVideoStreamer.release_all_input().
-const KEY_GROUP = "pico8_onscreen_keys"
-
-func force_release() -> void:
-	# Only HELD: that is the state a lost release leaves behind, and the only
-	# one that repeats. A LOCKED key is a deliberate choice, so leave it be.
-	if key_state != KeyState.HELD:
-		return
-	key_state = KeyState.RELEASED
-	repeat_timer = INF
-	send_ev(false)
-	if has_press_effect:
-		_update_visuals()
-		self.texture = texture_normal if texture_normal else keycap_normal
-
 func _ready() -> void:
-	add_to_group(KEY_GROUP)
 	if cap_type == KeycapType.HEX:
 		cap_text = cap_text.hex_decode().get_string_from_ascii()
 	elif cap_type == KeycapType.NONE:

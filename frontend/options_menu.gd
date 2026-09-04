@@ -259,11 +259,6 @@ func _ready() -> void:
 	_on_section_toggled(%BtnAudioToggle, %ContainerAudio)
 	_on_section_toggled(%BtnOfflineToggle, %ContainerOffline)
 
-	# Physical keyboard add-on: appends its own row to the Controls section.
-	# Deferred and last on purpose — it runs outside this _ready(), so nothing
-	# it does can interrupt the setup above.
-	PhysKeyboard.call_deferred("install_options_row", self)
-
 func _update_layout_deferred():
 	call_deferred("_update_layout")
 
