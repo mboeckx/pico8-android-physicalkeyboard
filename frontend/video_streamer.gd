@@ -1128,7 +1128,29 @@ static func is_system_landscape() -> bool:
 var input_blocked: bool = false
 
 func set_input_blocked(blocked: bool):
+	if blocked:
+		release_all_input()
 	input_blocked = blocked
+
+# Input can be taken away mid-press: the options menu opens on a left-edge
+# swipe and switches our input processing off, dialogs block input. Anything
+# still down at that moment never gets its release, so it stays latched in
+# PICO-8 — and an on-screen key left in HELD re-sends itself every
+# REPEAT_TIME_AFTER ms forever (key.gd:341), which with Escape flickers the
+# screen. So let go of everything before handing input away.
+func release_all_input() -> void:
+	var tree := get_tree()
+	if tree:
+		for node in tree.get_nodes_in_group("pico8_onscreen_keys"):
+			if node.has_method("force_release"):
+				node.force_release()
+
+	# Catch anything that reached held_keys by another route (controller
+	# buttons, the physical keyboard mapping) and was not let go.
+	for id in held_keys.duplicate():
+		held_keys.erase(id)
+		if id in SDL_KEYMAP:
+			send_key(SDL_KEYMAP[id], false, false, keys2sdlmod(held_keys))
 
 # --- Orientation Settings ---
 enum OrientationMode {

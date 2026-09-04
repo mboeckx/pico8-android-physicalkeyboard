@@ -471,6 +471,8 @@ static func _emit_action(streamer, action_id: String, event: InputEventKey) -> v
 # --- Options menu integration ----------------------------------------------
 
 static var _options_button: Button = null
+static var _options_row: Control = null
+static var _options_menu: Node = null
 
 
 # Adds a "Keyboard Mapping" row underneath "Manage Controllers".
@@ -497,12 +499,32 @@ static func install_options_row(menu: Node) -> void:
 	container.move_child(row, anchor.get_index() + 1)
 
 	_options_button = button
+	_options_row = row
+	_options_menu = menu
 	button.pressed.connect(func(): PhysKeyboard.open_dialog(menu))
 
 
 static func style_options_row(font_size: int) -> void:
-	if is_instance_valid(_options_button):
-		_options_button.add_theme_font_size_override("font_size", font_size)
+	if not is_instance_valid(_options_button):
+		return
+	_options_button.add_theme_font_size_override("font_size", font_size)
+
+	# A row holding nothing but a button is shorter than the toggle rows, whose
+	# wrapper reserves extra height, so it reads as cramped between them. Copy a
+	# styled wrapper's reserved height onto this row — and onto the equally bare
+	# "Manage Controllers" row above it — so the section spaces evenly.
+	var reserved := 30.0 * clampf(font_size / 10.0, 1.2, 3.0)
+	if is_instance_valid(_options_menu):
+		var probe: Node = _options_menu.get_node_or_null("%ToggleKeyboard")
+		if probe != null and probe.get_parent() is Control:
+			var wrapper: Control = probe.get_parent()
+			if wrapper.custom_minimum_size.y > 0.0:
+				reserved = wrapper.custom_minimum_size.y
+	if is_instance_valid(_options_row):
+		_options_row.custom_minimum_size.y = reserved
+		var neighbour = _options_row.get_parent().get_node_or_null("ConnectedControllersRow")
+		if neighbour is Control:
+			neighbour.custom_minimum_size.y = reserved
 
 
 static var _dialog: Node = null

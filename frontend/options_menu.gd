@@ -782,6 +782,9 @@ func open_menu():
 	if PicoVideoStreamer.instance:
 		# Only disable input if still open (prevents race with fast toggling)
 		if is_open:
+			# The edge swipe that opens us may have started on a key; without
+			# this it never sees its release and repeats forever.
+			PicoVideoStreamer.instance.release_all_input()
 			PicoVideoStreamer.instance.set_process_unhandled_input(false)
 			PicoVideoStreamer.instance.set_process_input(false)
 
