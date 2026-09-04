@@ -103,7 +103,7 @@ const ACTIONS: Array = [
 	{"id": "prev_editor", "name": "Previous editor tab", "mode": MODE_SHORTCUT, "native": "Alt+Left"},
 	{"id": "next_editor", "name": "Next editor tab", "mode": MODE_SHORTCUT, "native": "Alt+Right"},
 
-	{"section": "Keys your keyboard may not have"},
+	{"section": "Misc keys"},
 	{"id": "k_escape", "name": "Escape", "mode": MODE_KEY, "native": "Escape", "default": "Ctrl+Q"},
 	{"id": "k_tab", "name": "Tab", "mode": MODE_KEY, "native": "Tab"},
 	{"id": "k_up", "name": "Arrow Up", "mode": MODE_KEY, "native": "Up"},
