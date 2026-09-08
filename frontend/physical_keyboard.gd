@@ -170,6 +170,14 @@ static var _bind_lookup: Dictionary = {}    # keycode+mods -> action id (chords)
 static var _game_lookup: Dictionary = {}    # keycode+mods -> action id (game)
 static var _blocked_lookup: Dictionary = {} # keycode+mods -> true
 
+# What we believe PICO-8 currently has held. Kept in step with the real
+# keyboard by _sync_modifiers(). Plain bools rather than a dictionary keyed by
+# the scancode constants: an unquoted identifier key in a dictionary literal is
+# not reliably the constant's value.
+static var _ctrl_sent: bool = false
+static var _shift_sent: bool = false
+static var _alt_sent: bool = false
+
 
 static func ensure_loaded() -> void:
 	if _loaded:
@@ -379,6 +387,11 @@ static func handle_key_event(streamer, event: InputEventKey, navstate: int) -> b
 
 	var code := int(event.get_keycode_with_modifiers())
 	var base := code & KEY_CODE_MASK
+
+	# Runs for every key, consumed or not, so ordinary typing continuously
+	# corrects PICO-8's modifier state.
+	_sync_modifiers(streamer, event, base)
+
 	# A modifier on its own is never a chord — let it through so PICO-8 keeps
 	# tracking the real Ctrl/Shift/Alt state.
 	if base == KEY_CTRL or base == KEY_SHIFT or base == KEY_ALT or base == KEY_META:
@@ -403,6 +416,43 @@ static func handle_key_event(streamer, event: InputEventKey, navstate: int) -> b
 		return true
 
 	return false
+
+
+# Brings PICO-8's held-modifier state in line with what the keyboard actually
+# reports. Whatever the hardware does — an Fn layer that never sends a Ctrl
+# release of its own, a release swallowed while a menu held input, a chord
+# replay that got interrupted — the next keystroke puts it right. That is what
+# stops a modifier ever being latched "with no way of turning it off".
+static func _sync_modifiers(streamer, event: InputEventKey, base: int) -> void:
+	var want_ctrl := event.ctrl_pressed
+	var want_shift := event.shift_pressed
+	var want_alt := event.alt_pressed
+	# On a modifier's own event the mask can lag behind, so take that one from
+	# the press/release instead.
+	if base == KEY_CTRL:
+		want_ctrl = event.pressed
+	elif base == KEY_SHIFT:
+		want_shift = event.pressed
+	elif base == KEY_ALT:
+		want_alt = event.pressed
+
+	if want_ctrl != _ctrl_sent:
+		_ctrl_sent = want_ctrl
+		streamer.send_key(SDL_SC_CTRL, want_ctrl, false, _sent_mod_mask())
+	if want_shift != _shift_sent:
+		_shift_sent = want_shift
+		streamer.send_key(SDL_SC_SHIFT, want_shift, false, _sent_mod_mask())
+	if want_alt != _alt_sent:
+		_alt_sent = want_alt
+		streamer.send_key(SDL_SC_ALT, want_alt, false, _sent_mod_mask())
+
+
+static func _sent_mod_mask() -> int:
+	var mask := 0
+	if _ctrl_sent: mask |= KMOD_CTRL
+	if _shift_sent: mask |= KMOD_SHIFT
+	if _alt_sent: mask |= KMOD_ALT
+	return mask
 
 
 static func _sdl_id(keycode: int) -> String:
@@ -465,9 +515,14 @@ static func _emit_action(streamer, action_id: String, event: InputEventKey) -> v
 		streamer.send_input(printable.unicode_at(0))
 	streamer.send_key(SDL_KEYMAP[id], false, false, want_mod)
 
-	if want_ctrl: streamer.send_key(SDL_SC_CTRL, false, false, 0)
-	if want_shift: streamer.send_key(SDL_SC_SHIFT, false, false, 0)
-	if want_alt: streamer.send_key(SDL_SC_ALT, false, false, 0)
+	# Unconditionally, not just the ones this chord pressed: if a modifier was
+	# already latched for any reason, this is where it gets cleared.
+	streamer.send_key(SDL_SC_CTRL, false, false, 0)
+	streamer.send_key(SDL_SC_SHIFT, false, false, 0)
+	streamer.send_key(SDL_SC_ALT, false, false, 0)
+	_ctrl_sent = false
+	_shift_sent = false
+	_alt_sent = false
 
 
 # Lets go of everything the streamer still has latched. Called by the add-on's
