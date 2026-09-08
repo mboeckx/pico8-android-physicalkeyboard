@@ -161,6 +161,7 @@ const ACTIONS: Array = [
 
 static var enabled: bool = false
 static var game_mode: int = GameMode.AUTO
+static var debug_log: bool = false
 static var binds: Dictionary = {}    # action id -> chord string ("" = unbound)
 static var blocked: Dictionary = {}  # action id -> bool (MODE_SHORTCUT only)
 
@@ -192,6 +193,7 @@ static func ensure_loaded() -> void:
 	if cfg is Dictionary:
 		enabled = bool(cfg.get("enabled", false))
 		game_mode = int(cfg.get("game_mode", GameMode.AUTO))
+		debug_log = bool(cfg.get("debug_log", false))
 		for k in cfg.get("binds", {}):
 			binds[str(k)] = str(cfg["binds"][k])
 		for k in cfg.get("blocked", {}):
@@ -208,6 +210,7 @@ static func save() -> void:
 	PicoBootManager.set_setting(SETTINGS_SECTION, SETTINGS_KEY, {
 		"enabled": enabled,
 		"game_mode": game_mode,
+		"debug_log": debug_log,
 		"binds": binds,
 		"blocked": blocked,
 	})
@@ -267,6 +270,12 @@ static func set_blocked(action_id: String, value: bool) -> void:
 static func set_enabled(value: bool) -> void:
 	ensure_loaded()
 	enabled = value
+	save()
+
+
+static func set_debug_log(value: bool) -> void:
+	ensure_loaded()
+	debug_log = value
 	save()
 
 
@@ -387,6 +396,20 @@ static func handle_key_event(streamer, event: InputEventKey, navstate: int) -> b
 
 	var code := int(event.get_keycode_with_modifiers())
 	var base := code & KEY_CODE_MASK
+
+	if debug_log:
+		# Everything needed to see why a chord did or did not match.
+		print("[physkb] %s key=%s chord=%s ctrl=%s shift=%s alt=%s echo=%s uni=%d nav=0x%02x | bind=%s blocked=%s game=%s ctrl_sent=%s" % [
+			"DOWN" if event.pressed else "UP  ",
+			OS.get_keycode_string(base),
+			OS.get_keycode_string(code),
+			event.ctrl_pressed, event.shift_pressed, event.alt_pressed,
+			event.echo, event.unicode, navstate,
+			str(_bind_lookup.get(code, "-")),
+			str(_blocked_lookup.has(code)),
+			str(_game_lookup.get(code, "-")),
+			str(_ctrl_sent),
+		])
 
 	# Runs for every key, consumed or not, so ordinary typing continuously
 	# corrects PICO-8's modifier state.
